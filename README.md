@@ -2,10 +2,10 @@
 
 **教育資源導航 MCP** — 以 [TWCampus](https://twcampus.org/) 作為目錄入口，路由至台灣官方教育平台，即時搜尋並讀取公開學習資源。
 
+[![CI](https://github.com/trionnemesis/opendataCampus-MCP/actions/workflows/ci.yml/badge.svg)](https://github.com/trionnemesis/opendataCampus-MCP/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![MCP](https://img.shields.io/badge/MCP-FastMCP%203.x-7c3aed)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-26%20passed-brightgreen)
 
 讓 LLM 不用自己亂猜網址、也不會把整個教育網站爬回來，而是經由一個**合規、可稽核**的導航層：先從本地目錄（必要時補 TWCampus）找到正確的官方平台 → 在平台上搜尋 → 讀取單一資源摘要。
 
@@ -22,6 +22,7 @@
 - [瀏覽政策（合規護欄）](#瀏覽政策合規護欄)
 - [內建教育平台目錄](#內建教育平台目錄)
 - [測試](#測試)
+- [來源 live 健康度](#來源-live-健康度)
 - [專案結構](#專案結構)
 - [開發與 SDD 規格](#開發與-sdd-規格)
 - [擴充指南](#擴充指南)
@@ -313,12 +314,17 @@ python -m opendata_campus_mcp.mcp_server
 ## 測試
 
 ```bash
-# 單元測試（26 個；service / browser_policy / source_router）
+# 單元測試（26 個；service / browser_policy / source_router）— CI 在此 gate
 pytest tests/ -v
 
 # 端對端整合測試（需網路，實際抓取 NTU OCW）
 python scripts/integration_e2e.py
+
+# 全來源 live smoke test（需網路，對 10 個內建來源各跑一次 browse 並回報健康度）
+python scripts/smoke_sources.py
 ```
+
+`scripts/smoke_sources.py` 是維護者用的 live 診斷工具（**非** CI gate）：對每個內建來源跑一次 `browse`，依連線結果標記 ✅ OK / ⚠️ EMPTY / 🔒 LOGIN / ❌ UNAVAILABLE，快速看出哪些來源的搜尋 / 解析器仍正常。最近實測見 [來源 live 健康度](#來源-live-健康度)。
 
 整合測試實際抓取結果（真實遠端，非快取）：
 
@@ -336,10 +342,35 @@ URL      : https://ocw.aca.ntu.edu.tw/courses/mooc0073
 
 ---
 
+## 來源 live 健康度
+
+最近一次 `scripts/smoke_sources.py` 實測（Python 3.14 + 較新 OpenSSL 環境）：
+
+| 來源 | 狀態 | 說明 |
+|------|------|------|
+| 全民英檢 GEPT | ✅ OK | browse 回傳 5 筆 |
+| 均一教育平台 | ✅ OK | browse 回傳 5 筆 |
+| 臺大開放式課程 NTU OCW | ✅ OK | browse 回傳 5 筆 |
+| 因材網 | 🔶 憑證相容性 | 網站正常（`curl` 302），Python OpenSSL 因憑證缺 Subject Key Identifier 而拒絕 |
+| 國立公共資訊圖書館 | 🔶 憑證相容性 | 網站正常（`curl` 200），同上 |
+| 教育部學力認證 | 🔶 憑證相容性 | 網站正常（`curl` 200），同上 |
+| 教育大市集 | ⛔ 連線受阻 | TLS 握手 send failure（疑似阻擋非瀏覽器） |
+| CIRN | ⛔ 連線受阻 | 連線逾時 |
+| 教育部數位教學資源入口網 | ❌ DNS 失效 | `resources.cloud.edu.tw` 無法解析 |
+| 國教院課程資源網 | ❌ DNS 失效 | `hh.ntue.edu.tw` 無法解析 |
+
+- **🔶 憑證相容性**：網站本身存活，僅因台灣 .edu.tw 政府憑證缺少 Subject Key Identifier、在較新 OpenSSL 下驗證失敗；於使用系統憑證庫或較舊 OpenSSL 的環境通常可正常抓取。
+- **❌ DNS 失效**：[`source_cache.py`](src/opendata_campus_mcp/repository/source_cache.py) 中這兩筆 `official_url` 已無法解析，需更新為現行網址。
+- 此表為單一環境快照，僅供參考；請以你自己環境執行 `smoke_sources.py` 的結果為準。
+
+---
+
 ## 專案結構
 
 ```
 opendataCampus-MCP/
+├── .github/workflows/
+│   └── ci.yml                      # GitHub Actions：離線單元測試 gate
 ├── spec/
 │   ├── erm.dbml                    # DDD 領域模型（DBML）
 │   └── features/                   # BDD Gherkin 規格
@@ -368,7 +399,8 @@ opendataCampus-MCP/
 │   ├── test_source_router.py
 │   └── test_service.py
 ├── scripts/
-│   └── integration_e2e.py          # 端對端整合測試
+│   ├── integration_e2e.py          # 端對端整合測試（NTU OCW）
+│   └── smoke_sources.py            # 全來源 live 健康度 smoke test
 └── pyproject.toml
 ```
 
@@ -401,7 +433,7 @@ opendataCampus-MCP/
 
 誠實標註目前邊界，供使用前評估：
 
-- **live 抓取目前僅驗證 NTU OCW**：10 個內建來源中，僅臺大 OCW 經端對端真實抓取驗證；其餘 9 個平台的搜尋 / 解析器尚未經 live 驗證，實際可用性可能因各站結構而異。
+- **各來源 live 可用性不一**：實測 10 個內建來源中 3 個可正常 browse（GEPT、均一、NTU OCW），3 個憑證相容性、2 個連線受阻、2 個 DNS 失效 — 詳見 [來源 live 健康度](#來源-live-健康度)。可用性會隨各站改版與執行環境而變動。
 - **`read` 的 `education_stage` / `subject` 目前固定回傳 `null`**：[`web_search.py`](src/opendata_campus_mcp/adapters/web_search.py) 尚未實作這兩個欄位的擷取邏輯。
 - **`discover` 的 TWCampus 降級是靜默的**：TWCampus 任何故障（含潛在程式錯誤）都會被吞為 `log.info` 後退回本地目錄，正常路徑與降級路徑對使用者輸出不易區分。
 - **NTU OCW 的 `browse` 為首頁列表而非關鍵字搜尋**：因目標站 WAF 限制，`query` 實際未對課程做過濾，回傳的是首頁近期課程清單，語意與「搜尋」略有落差。
