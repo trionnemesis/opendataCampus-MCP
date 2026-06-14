@@ -1,0 +1,95 @@
+// Education Resource Browser MCP — 領域模型
+// Bounded Context: Education Source Discovery
+//
+// 設計原則：
+//   TWCampus 僅作「導航目錄」，不儲存其資源內容；
+//   education_sources 為已知平台的本地快取，TWCampus 負責發現新平台；
+//   browse_sessions 追蹤每次工具呼叫的瀏覽行為，確保合規。
+
+Table education_sources {
+  id            varchar   [pk]
+  name          varchar   [not null]
+  official_url  varchar   [not null, note: '公開可存取的官方 URL']
+  description   text
+  categories    jsonb     [note: '["教案","多媒體","國中","高中"]']
+  education_stages jsonb  [note: '["國小","國中","高中"]']
+  access_strategy access_strategy [not null]
+  directory_source varchar [default: 'TWCampus']
+  enabled       boolean   [not null, default: true]
+  last_verified_at timestamp
+
+  Note: '''
+  Aggregate Root。
+  事件：SourceDiscovered / SourceDisabled。
+  不變量：
+    1. official_url 必須為公開可存取 URL
+    2. HEADLESS_BROWSER 策略預設 enabled=false，須明確啟用
+  '''
+}
+
+Enum access_strategy {
+  OFFICIAL_API     [note: '官方 REST/GraphQL API — 最優先']
+  OPEN_DATA        [note: '政府開放資料端點']
+  WEB_SEARCH       [note: '官方網站 HTTP 搜尋']
+  TWCAMPUS_DIRECTORY [note: 'TWCampus 目錄路由 — 僅用於發現新平台']
+  HEADLESS_BROWSER [note: 'Playwright 後備 — 預設停用，最後手段']
+}
+
+Table browse_sessions {
+  id            integer   [pk, increment]
+  source_id     varchar   [ref: > education_sources.id]
+  query         varchar   [not null]
+  triggered_at  timestamp [not null]
+  strategy      access_strategy [not null]
+  pages_opened  integer   [default: 1, note: '每次請求 ≤ BrowserPolicy.max_pages_per_request(=2)']
+  result_count  integer   [default: 0]
+  status        session_status [not null]
+  error_detail  text
+
+  Note: '''
+  Value Object。追蹤每次工具呼叫的瀏覽行為。
+  不變量：
+    1. pages_opened ≤ BrowserPolicy.max_pages_per_request (=2)
+    2. triggered_at 由使用者工具呼叫產生，非排程
+    3. 不儲存完整 HTML、截圖或建立向量索引
+  '''
+}
+
+Enum session_status {
+  SUCCEEDED
+  FAILED
+  RATE_LIMITED
+  LOGIN_REQUIRED
+  POLICY_VIOLATED
+}
+
+Table rate_limit_counters {
+  domain        varchar   [pk, note: 'twcampus.org / market.cloud.edu.tw 等']
+  window_start  timestamp [not null]
+  request_count integer   [not null, default: 0]
+
+  Note: '''
+  Value Object（In-memory）。
+  不變量：request_count ≤ BrowserPolicy.max_requests_per_minute (=3)
+  '''
+}
+
+// ============================================
+// 領域事件
+// ============================================
+// SourceDiscovered      → 新增至 education_sources
+// SourceVerified        → 更新 last_verified_at
+// BrowseSessionStarted  → 記錄 browse_sessions
+// BrowseSessionEnded    → 更新 result_count / status
+// RateLimitExceeded     → 拋出 RateLimitError
+//
+// ============================================
+// 不變量
+// ============================================
+// 1. TWCampus 每次請求最多 2 頁（max_pages_per_request=2）
+// 2. 每分鐘最多 3 次 TWCampus 請求（max_requests_per_minute=3）
+// 3. HEADLESS_BROWSER 預設停用，啟用須明確設定
+// 4. 不執行排程爬取；所有工具呼叫須由使用者觸發
+// 5. 不遞迴導航；僅分析當前頁面平台列表
+// 6. 不儲存完整 HTML、截圖，不建立向量索引
+// 7. 所有回傳結果必須包含 official_url 與 directory_source
