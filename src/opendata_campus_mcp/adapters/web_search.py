@@ -10,10 +10,13 @@
 from __future__ import annotations
 
 import logging
+import os
+import ssl
 from typing import Any
 from urllib.parse import quote, urljoin
 
 import httpx
+import truststore
 from bs4 import BeautifulSoup, Tag
 
 from opendata_campus_mcp.contracts import (
@@ -32,11 +35,13 @@ _MAX_SUMMARY_CHARS = 500
 
 # 已知平台搜尋 URL 樣板（{query} 會被 URL encode 後替換）
 # NTU OCW 的 /courses 路徑被 WAF 封鎖，改以首頁作為課程目錄（首頁含近期課程列表）
+# 教育雲（cloud.edu.tw）搜尋為前端 JS 驅動、無 server 端 GET 搜尋頁，故以首頁為資源入口（伺服器端忽略關鍵字）
 SEARCH_TEMPLATES: dict[str, str] = {
     "教育大市集": "https://market.cloud.edu.tw/index.php?inter=search&keyword={query}",
     "因材網": "https://adl.edu.tw/?s={query}",
     "CIRN": "https://cirn.moe.edu.tw/Module/Basic/bsSearch.aspx?search={query}",
-    "教育部數位教學資源入口網": "https://resources.cloud.edu.tw/search?keyword={query}",
+    "教育部數位教學資源入口網": "https://cloud.edu.tw/?q={query}",
+    "國教院課程資源網": "https://www.naer.edu.tw/PageSearch?q={query}",
     "臺大開放式課程 NTU OCW": "https://ocw.aca.ntu.edu.tw/",
 }
 
@@ -45,10 +50,20 @@ class WebSearchAdapter:
     access_strategy = AccessStrategy.WEB_SEARCH
 
     def __init__(self) -> None:
+        # 台灣政府教育平台多以 GCA 憑證簽發，部分缺 Subject Key Identifier，
+        # 在 certifi + 嚴格 OpenSSL 下會驗證失敗；改用 OS 系統信任庫驗證（不放寬安全）。
+        ssl_ctx = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        # truststore 不讀 SSL_CERT_FILE / SSL_CERT_DIR；在 corporate proxy 或
+        # private-CA 環境下這些變數仍需被納入信任，所以手動載入。
+        _cert_file = os.environ.get("SSL_CERT_FILE")
+        _cert_dir = os.environ.get("SSL_CERT_DIR")
+        if _cert_file or _cert_dir:
+            ssl_ctx.load_verify_locations(cafile=_cert_file, capath=_cert_dir)
         self._client = httpx.AsyncClient(
             headers={"User-Agent": _USER_AGENT},
             timeout=20.0,
             follow_redirects=True,
+            verify=ssl_ctx,
         )
 
     async def browse(

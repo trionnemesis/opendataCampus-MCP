@@ -36,7 +36,7 @@ _CATALOG: list[EducationSource] = [
     ),
     EducationSource(
         name="教育部數位教學資源入口網",
-        official_url="https://resources.cloud.edu.tw",
+        official_url="https://cloud.edu.tw",
         description="整合 OpenEdu 資源，提供開放授權教學素材",
         categories=("開放教育", "數位資源", "OER", "教學素材"),
         education_stages=("國小", "國中", "高中", "大學"),
@@ -84,7 +84,7 @@ _CATALOG: list[EducationSource] = [
     ),
     EducationSource(
         name="國教院課程資源網",
-        official_url="https://hh.ntue.edu.tw",
+        official_url="https://www.naer.edu.tw",
         description="國家教育研究院課程資源，提供十二年國教相關素材",
         categories=("十二年國教", "課程資源", "素養導向"),
         education_stages=("國小", "國中", "高中"),
