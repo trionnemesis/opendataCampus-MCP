@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import ssl
 from typing import Any
 from urllib.parse import quote, urljoin
@@ -52,6 +53,12 @@ class WebSearchAdapter:
         # 台灣政府教育平台多以 GCA 憑證簽發，部分缺 Subject Key Identifier，
         # 在 certifi + 嚴格 OpenSSL 下會驗證失敗；改用 OS 系統信任庫驗證（不放寬安全）。
         ssl_ctx = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        # truststore 不讀 SSL_CERT_FILE / SSL_CERT_DIR；在 corporate proxy 或
+        # private-CA 環境下這些變數仍需被納入信任，所以手動載入。
+        _cert_file = os.environ.get("SSL_CERT_FILE")
+        _cert_dir = os.environ.get("SSL_CERT_DIR")
+        if _cert_file or _cert_dir:
+            ssl_ctx.load_verify_locations(cafile=_cert_file, capath=_cert_dir)
         self._client = httpx.AsyncClient(
             headers={"User-Agent": _USER_AGENT},
             timeout=20.0,
