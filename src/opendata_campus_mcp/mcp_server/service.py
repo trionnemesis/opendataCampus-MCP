@@ -17,7 +17,11 @@ from opendata_campus_mcp.contracts import (
     BrowseRequest,
     DiscoveryRequest,
     EducationSource,
+    ExamArchiveAdapter,
+    ExamQuestionResult,
+    ExamSearchRequest,
     ReadRequest,
+    SourceUnavailableError,
 )
 from opendata_campus_mcp.domain.browser_policy import BrowserPolicy
 from opendata_campus_mcp.domain.source_router import SourceRouter
@@ -34,12 +38,14 @@ class EdBrowserService:
         twcampus: TwCampusDirectoryAdapter,
         adapters: dict[AccessStrategy, BrowseAdapter],
         fallback: BrowseAdapter,
+        exam_adapter: ExamArchiveAdapter | None = None,
     ) -> None:
         self._policy = policy
         self._router = router
         self._twcampus = twcampus
         self._adapters = adapters
         self._fallback = fallback
+        self._exam_adapter = exam_adapter
 
     # ── discover_education_sources ────────────────────────────────────────────
 
@@ -113,6 +119,23 @@ class EdBrowserService:
     async def read_resource(self, request: ReadRequest) -> dict[str, Any]:
         return await self._fallback.read(request.url, list(request.extract))
 
+    # ── search_exam_questions ─────────────────────────────────────────────────
+
+    async def search_exam_questions(self, request: ExamSearchRequest) -> dict[str, Any]:
+        if self._exam_adapter is None:
+            raise SourceUnavailableError(
+                "CEEC 大考中心", "https://www.ceec.edu.tw",
+                "exam adapter not configured",
+            )
+        results = await self._exam_adapter.search(request)
+        return {
+            "exam_type": request.exam_type,
+            "year": request.year,
+            "subject": request.subject,
+            "total_returned": len(results),
+            "questions": [_exam_to_dict(r) for r in results],
+        }
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -125,4 +148,17 @@ def _source_to_dict(s: EducationSource) -> dict[str, Any]:
         "categories": list(s.categories),
         "directory_source": s.directory_source,
         "access_strategy": s.access_strategy.value,
+    }
+
+
+def _exam_to_dict(r: ExamQuestionResult) -> dict[str, Any]:
+    return {
+        "exam_type": r.exam_type,
+        "year": r.year,
+        "subject": r.subject,
+        "paper_type": r.paper_type,
+        "title": r.title,
+        "download_url": r.download_url,
+        "source": r.source,
+        "published": r.published,
     }

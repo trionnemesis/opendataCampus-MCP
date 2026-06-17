@@ -73,7 +73,7 @@ opendata-campus-mcp
 python -m opendata_campus_mcp.mcp_server
 ```
 
-設定完成後，於 client 中可看到 `discover_education_sources`、`browse_education_source`、`read_education_resource` 三個工具。完整 API 見 [MCP 工具](tools.md)。
+設定完成後，於 client 中可看到 `discover_education_sources`、`browse_education_source`、`read_education_resource`、`search_exam_questions` 四個工具。完整 API 見 [MCP 工具](tools.md)。
 
 ---
 
@@ -107,7 +107,7 @@ claude mcp add opendata-campus -e EDUMARKET_API_KEY=<key> -- /絕對路徑/opend
 ## 測試
 
 ```bash
-# 單元測試（41 個；service / browser_policy / source_router / edumarket）— CI 在此 gate
+# 單元測試（65 個；service / browser_policy / source_router / edumarket / ceec_exam）— CI 在此 gate
 pytest tests/ -v
 
 # 端對端整合測試（教育大市集官方 API，需 EDUMARKET_API_KEY；未設時自動跳過）

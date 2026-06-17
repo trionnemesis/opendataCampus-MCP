@@ -14,7 +14,10 @@ from opendata_campus_mcp.contracts import (
     BrowseRequest,
     DiscoveryRequest,
     EducationSource,
+    ExamQuestionResult,
+    ExamSearchRequest,
     LoginRequiredError,
+    PolicyViolationError,
     ReadRequest,
     SearchResult,
     SourceUnavailableError,
@@ -259,3 +262,57 @@ async def test_read_login_required_propagates(service: EdBrowserService, mock_we
     req = ReadRequest(url="https://private.edu.tw/resource/1")
     with pytest.raises(LoginRequiredError):
         await service.read_resource(req)
+
+
+# ── search_exam_questions ─────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_search_exam_returns_dict_with_questions(
+    policy: BrowserPolicy,
+    router: SourceRouter,
+    mock_twcampus: AsyncMock,
+    mock_web: AsyncMock,
+):
+    mock_exam = AsyncMock()
+    mock_exam.search.return_value = [
+        ExamQuestionResult(
+            exam_type="學測", year="115", subject="數學A", paper_type="試題",
+            title="03-115學測數學A試卷", download_url="https://www.ceec.edu.tw/x/a.pdf",
+            source="CEEC",
+        )
+    ]
+    svc = EdBrowserService(
+        policy, router, mock_twcampus,
+        {AccessStrategy.WEB_SEARCH: mock_web}, fallback=mock_web,
+        exam_adapter=mock_exam,
+    )
+    out = await svc.search_exam_questions(ExamSearchRequest("學測", year="115"))
+    assert out["exam_type"] == "學測"
+    assert out["total_returned"] == 1
+    assert out["questions"][0]["download_url"] == "https://www.ceec.edu.tw/x/a.pdf"
+    assert out["questions"][0]["paper_type"] == "試題"
+
+
+@pytest.mark.asyncio
+async def test_search_exam_no_adapter_raises(service: EdBrowserService):
+    # 既有 service fixture 未注入 exam_adapter（=None）→ safety net
+    with pytest.raises(SourceUnavailableError):
+        await service.search_exam_questions(ExamSearchRequest("學測"))
+
+
+@pytest.mark.asyncio
+async def test_search_exam_propagates_policy_error(
+    policy: BrowserPolicy,
+    router: SourceRouter,
+    mock_twcampus: AsyncMock,
+    mock_web: AsyncMock,
+):
+    mock_exam = AsyncMock()
+    mock_exam.search.side_effect = PolicyViolationError("page limit")
+    svc = EdBrowserService(
+        policy, router, mock_twcampus,
+        {AccessStrategy.WEB_SEARCH: mock_web}, fallback=mock_web,
+        exam_adapter=mock_exam,
+    )
+    with pytest.raises(PolicyViolationError):
+        await svc.search_exam_questions(ExamSearchRequest("學測"))

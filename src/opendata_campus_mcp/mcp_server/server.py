@@ -15,6 +15,7 @@ from fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from opendata_campus_mcp.adapters.ceec_exam import CeecExamAdapter
 from opendata_campus_mcp.adapters.edumarket import EduMarketApiAdapter
 from opendata_campus_mcp.adapters.twcampus import TwCampusDirectoryAdapter
 from opendata_campus_mcp.adapters.web_search import WebSearchAdapter
@@ -23,6 +24,7 @@ from opendata_campus_mcp.contracts import (
     BrowseAdapter,
     BrowseRequest,
     DiscoveryRequest,
+    ExamSearchRequest,
     LoginRequiredError,
     PolicyViolationError,
     RateLimitError,
@@ -41,13 +43,16 @@ _INSTRUCTIONS = """\
   1. discover_education_sources — 找到相關官方教育平台（從本地目錄 + TWCampus）
   2. browse_education_source    — 在指定平台上搜尋學習資源
   3. read_education_resource    — 讀取單一資源頁面的摘要資訊
+  4. search_exam_questions      — 取得 CEEC 學測/分科測驗考古題的官方下載連結（不下載全文）
 
-瀏覽政策（TWCampus 條款合規）：
-  - 每次請求最多 2 頁 TWCampus；每分鐘最多 3 次 TWCampus 請求
-  - 不執行排程爬取；不遞迴導航；不儲存完整 HTML
-  - 所有結果均包含 official_url 與來源標記
-  - 不嘗試登入或繞過任何存取控制
+瀏覽政策（合規護欄）：
+  - 每次請求最多 2 頁；每分鐘最多 3 次（per-domain 滑動視窗）
+  - 不執行排程爬取；不遞迴導航；不儲存完整 HTML / 不下載試題 PDF 全文
+  - 所有結果均包含來源標記
+  - 不嘗試登入或繞過任何存取控制；考古題僅支援 CEEC 學測/分科,會考因 robots.txt 排除
 """
+
+_SUPPORTED_EXAM_TYPES = ("學測", "分科測驗")
 
 
 def build_server() -> FastMCP:
@@ -64,7 +69,10 @@ def build_server() -> FastMCP:
         adapters[AccessStrategy.OFFICIAL_API] = EduMarketApiAdapter(
             api_key, html_reader=web
         )
-    service = EdBrowserService(policy, router, twcampus, adapters, fallback=web)
+    exam = CeecExamAdapter(policy)  # 與 twcampus 共用同一 policy（per-domain 計數互不干擾）
+    service = EdBrowserService(
+        policy, router, twcampus, adapters, fallback=web, exam_adapter=exam
+    )
 
     mcp = FastMCP("opendata-campus-mcp", instructions=_INSTRUCTIONS)
 
@@ -155,5 +163,52 @@ def build_server() -> FastMCP:
             return {"error": "login_required", "url": url, "message": str(exc)}
         except SourceUnavailableError as exc:
             return {"error": "source_unavailable", "url": url, "message": str(exc)}
+
+    # ── Tool 4：search_exam_questions ─────────────────────────────────────────
+
+    @mcp.tool()
+    async def search_exam_questions(
+        exam_type: str,
+        year: str | None = None,
+        subject: str | None = None,
+        max_results: int = 10,
+    ) -> dict:
+        """搜尋台灣升學考古題，回傳官方試題檔案下載連結與結構化 metadata。
+
+        exam_type：學測 / 分科測驗（第一階僅此二者；會考因 robots.txt 限制不納入）。
+        year：民國年字串如「115」，省略則不限。
+        subject：科目關鍵字如 國綜 / 英文 / 數學A，省略則不限。
+        回傳 questions[]，每筆含 exam_type/year/subject/paper_type/title/download_url/source。
+        年份與科目為 best-effort 解析（每筆附原始 title）；連結多為 PDF，部分另有 .docx。
+        不下載或儲存試題內容。單次僅掃描最新約 20 筆，較舊年份請縮小 subject 或分次查詢。
+        """
+        if exam_type not in _SUPPORTED_EXAM_TYPES:
+            return {
+                "error": "unsupported_exam_type",
+                "message": f"目前僅支援 {' / '.join(_SUPPORTED_EXAM_TYPES)}；"
+                           "會考因 robots.txt Disallow 不納入",
+                "exam_type": exam_type,
+            }
+        req = ExamSearchRequest(
+            exam_type=exam_type,
+            year=year,
+            subject=subject,
+            max_results=min(max_results, 20),
+        )
+        try:
+            return await service.search_exam_questions(req)
+        except RateLimitError as exc:
+            return {"error": "rate_limited", "message": str(exc)}
+        except PolicyViolationError as exc:
+            return {"error": "policy_violated", "message": str(exc)}
+        except SourceUnavailableError as exc:
+            return {
+                "error": "source_unavailable",
+                "source": exc.source_name,
+                "url": exc.url,
+                "message": str(exc),
+            }
+        except LoginRequiredError as exc:
+            return {"error": "login_required", "message": str(exc)}
 
     return mcp

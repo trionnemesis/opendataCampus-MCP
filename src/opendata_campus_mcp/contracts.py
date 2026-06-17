@@ -71,6 +71,23 @@ class ResourceDetail:
 
 
 @dataclass(frozen=True)
+class ExamQuestionResult:
+    """search_exam_questions 回傳的單筆考題連結。Value Object。
+
+    只承載官方試題的下載連結與 metadata；不下載、不儲存 PDF 全文。
+    """
+
+    exam_type: str          # 學測 / 分科測驗
+    year: str               # 民國年字串，如 "115"（解析失敗為 ""）
+    subject: str            # 科目，如 國綜 / 英文 / 數學A
+    paper_type: str         # 試題 / 答案 / 其他
+    title: str              # 檔案層級標題（如「01-115學測國綜試卷」），永遠保留
+    download_url: str       # 絕對 URL（多為 PDF，CEEC 部分另提供 .docx 等格式）
+    source: str             # 來源站名 + listing URL（出處可追溯）
+    published: str | None = None   # 公告日期，如 "115-02-23"
+
+
+@dataclass(frozen=True)
 class DiscoveryRequest:
     query: str
     education_stage: str | None = None
@@ -92,6 +109,14 @@ class ReadRequest:
         "title", "summary", "publisher",
         "education_stage", "subject", "license",
     )
+
+
+@dataclass(frozen=True)
+class ExamSearchRequest:
+    exam_type: str                 # 學測 / 分科測驗
+    year: str | None = None        # 民國年過濾，None = 不限
+    subject: str | None = None     # 科目過濾，None = 不限
+    max_results: int = 10
 
 
 # ──────────────────────────────────────────
@@ -140,3 +165,9 @@ class BrowseAdapter(Protocol):
     ) -> list[SearchResult]: ...
 
     async def read(self, url: str, extract: list[str]) -> dict[str, Any]: ...
+
+
+class ExamArchiveAdapter(Protocol):
+    """考古題來源介面 — 回傳試題下載連結與 metadata，不下載全文。"""
+
+    async def search(self, request: ExamSearchRequest) -> list[ExamQuestionResult]: ...

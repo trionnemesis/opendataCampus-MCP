@@ -10,7 +10,7 @@
 └───────────────────────┬───────────────────────────────┘
                         │ stdio (MCP protocol)
 ┌───────────────────────▼───────────────────────────────┐
-│  mcp_server/server.py    FastMCP · 3 tools · /healthz  │
+│  mcp_server/server.py    FastMCP · 4 tools · /healthz  │
 │  mcp_server/service.py   EdBrowserService（協調層）     │
 ├────────────────────────────────────────────────────────┤
 │  domain/   browser_policy（速率/頁面護欄）              │
@@ -18,6 +18,7 @@
 ├────────────────────────────────────────────────────────┤
 │  adapters/    twcampus（目錄）· web_search（搜尋/讀取） │
 │               edumarket（教育大市集官方 API）           │
+│               ceec_exam（CEEC 考古題 listing，只回連結）│
 │               _http（共用 SSL context）                 │
 │               headless（Playwright 後備，預設停用）     │
 │  repository/  source_cache（9 平台靜態目錄）            │
@@ -28,7 +29,7 @@
         台灣官方教育平台（教育大市集、因材網、均一 …）
 ```
 
-各層僅依賴 `contracts.py` 的型別，符合依賴反轉；`service.py` 以建構子注入 policy / router / adapter，並依 `source.access_strategy` 從 adapter registry 分派（找不到對應策略則落回 fallback web_search），方便測試以 mock 替換。
+各層僅依賴 `contracts.py` 的型別，符合依賴反轉；`service.py` 以建構子注入 policy / router / adapter，並依 `source.access_strategy` 從 adapter registry 分派（找不到對應策略則落回 fallback web_search），方便測試以 mock 替換。`ceec_exam` 是不經 `access_strategy` 路由的獨立垂直 adapter，由 `search_exam_questions` 直接呼叫，與 `twcampus` 共用同一 `BrowserPolicy`（per-domain 計數互不干擾）。
 
 ---
 
@@ -49,6 +50,13 @@ read_education_resource       讀取單一資源頁面（摘要 ≤ 500 字元�
    │
    ▼
 回傳：標題、摘要、來源 URL、發行者
+
+─── 獨立垂直（不經三段式路由）──────────────────────────────
+search_exam_questions         CEEC 考古題（學測 / 分科測驗）→ CeecExamAdapter
+   │                          httpx + BeautifulSoup 解析 listing 表格，
+   │                          一列多檔攤平成多筆；只回 PDF/.docx 連結字串，不 fetch 全文
+   ▼
+回傳：questions[]（exam_type / year / subject / paper_type / title / download_url / source）
 ```
 
 **設計取捨**：TWCampus 服務條款禁止大量下載，因此本專案將 TWCampus 定位為「**路由目錄**」而非資源倉庫 — 不儲存內容、不遞迴導航、不建立向量索引，所有抓取都由使用者即時觸發。
@@ -78,6 +86,7 @@ opendataCampus-MCP/
 │   │   ├── twcampus.py             # TWCampus 目錄導航（httpx）
 │   │   ├── web_search.py           # 官方平台搜尋 / 讀取（httpx + BS4）
 │   │   ├── edumarket.py            # 教育大市集官方 API adapter（OFFICIAL_API）
+│   │   ├── ceec_exam.py            # CEEC 考古題 listing adapter（httpx + BS4，只回連結）
 │   │   ├── _http.py                # 共用 SSL context（台灣政府憑證 workaround）
 │   │   └── headless.py             # Playwright 後備（預設停用）
 │   ├── repository/
@@ -90,7 +99,8 @@ opendataCampus-MCP/
 │   ├── test_browser_policy.py
 │   ├── test_source_router.py
 │   ├── test_service.py
-│   └── test_edumarket.py           # 教育大市集 adapter（httpx.MockTransport，離線）
+│   ├── test_edumarket.py           # 教育大市集 adapter（httpx.MockTransport，離線）
+│   └── test_ceec_exam.py           # CEEC 考古題 adapter（httpx.MockTransport，離線）
 ├── scripts/
 │   ├── integration_e2e.py          # 端對端整合測試（教育大市集官方 API）
 │   └── smoke_sources.py            # 全來源 live 健康度 smoke test

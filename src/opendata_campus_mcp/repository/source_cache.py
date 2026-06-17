@@ -59,7 +59,7 @@ _CATALOG: list[EducationSource] = [
         access_strategy=AccessStrategy.WEB_SEARCH,
     ),
     EducationSource(
-        name="教育部學力認證",
+        name="大學入學考試中心 CEEC",
         official_url="https://www.ceec.edu.tw",
         description="大學入學考試中心，提供學科能力測驗與歷屆試題",
         categories=("學測", "指考", "歷屆試題", "升學"),

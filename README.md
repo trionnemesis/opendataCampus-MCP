@@ -18,7 +18,7 @@
 | 文件 | 內容 |
 |------|------|
 | [安裝與設定](docs/setup.md) | 安裝步驟、在 Claude Desktop / Claude Code 中設定、測試指令 |
-| [MCP 工具 API](docs/tools.md) | `discover` / `browse` / `read` 三個工具的參數、回傳範例、錯誤回傳 |
+| [MCP 工具 API](docs/tools.md) | `discover` / `browse` / `read` / `search_exam_questions` 四個工具的參數、回傳範例、錯誤回傳 |
 | [架構與設計](docs/architecture.md) | 分層架構圖、運作原理、專案結構、SDD 規格、擴充指南 |
 | [教育平台來源](docs/sources.md) | 內建 10 個平台目錄、來源 live 健康度實測 |
 | [合規與限制](docs/compliance.md) | 瀏覽政策護欄、已知問題、合規聲明 |
@@ -65,6 +65,7 @@ claude mcp add opendata-campus -- /絕對路徑/opendataCampus-MCP/.venv/bin/ope
 | `discover_education_sources(query, education_stage?, subject?, max_sources=3)` | 找到相關官方教育平台 |
 | `browse_education_source(source, query, max_results=5)` | 在指定平台搜尋學習資源 |
 | `read_education_resource(url, extract?)` | 讀取單一資源頁面摘要 |
+| `search_exam_questions(exam_type, year?, subject?, max_results=10)` | 找升學考古題（CEEC 學測 / 分科測驗）的官方下載連結 |
 
 > 參數細節、回傳範例與錯誤回傳見 [MCP 工具 API](docs/tools.md)。
 
