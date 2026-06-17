@@ -15,7 +15,7 @@
 
 `HeadlessAdapter` 的瀏覽範圍被刻意限制：單頁、只抽 `<main>` 內的連結、不遞迴、不存 HTML / 截圖。預設停用是合規設計——對應 [瀏覽政策護欄](compliance.md#瀏覽政策合規護欄)（每域 3 req/min、每次 2 頁、禁排程、禁遞迴）。
 
-**何時才真的需要無頭瀏覽？** JS-heavy SPA、反爬蟲 / Cloudflare、登入牆、需互動填表。目前 10 個內建台灣官方教育平台多為 server-rendered HTML，`httpx + BS4` 已足夠，故後備預設關閉。
+**何時才真的需要無頭瀏覽？** JS-heavy SPA、反爬蟲 / Cloudflare、登入牆、需互動填表。目前 9 個內建台灣官方教育平台多為 server-rendered HTML，`httpx + BS4` 已足夠，故後備預設關閉。
 
 ---
 

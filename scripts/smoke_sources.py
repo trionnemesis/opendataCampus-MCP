@@ -1,4 +1,4 @@
-"""Live smoke test — 對全部 10 個內建教育來源各跑一次 browse，回報可達性與抓取健康度。
+"""Live smoke test — 對全部 9 個內建教育來源各跑一次 browse，回報可達性與抓取健康度。
 
 定位：維護者用的「live 診斷工具」，非 CI gate。實際連線台灣教育平台，
 結果可能因各站結構改版、WAF、網路波動而異；用來快速看出哪些來源的
@@ -25,6 +25,7 @@ sys.path.insert(0, "src")
 from opendata_campus_mcp.adapters.twcampus import TwCampusDirectoryAdapter
 from opendata_campus_mcp.adapters.web_search import WebSearchAdapter
 from opendata_campus_mcp.contracts import (
+    AccessStrategy,
     BrowseRequest,
     LoginRequiredError,
     SourceUnavailableError,
@@ -44,7 +45,6 @@ SMOKE_QUERIES: dict[str, str] = {
     "國立公共資訊圖書館": "閱讀",
     "教育部學力認證": "學測",
     "均一教育平台": "數學",
-    "臺大開放式課程 NTU OCW": "資訊",
     "國教院課程資源網": "素養",
 }
 
@@ -76,7 +76,9 @@ async def main() -> int:
     router = SourceRouter(get_known_sources())
     twcampus = TwCampusDirectoryAdapter(policy)
     web = WebSearchAdapter()
-    svc = EdBrowserService(policy, router, twcampus, web)
+    svc = EdBrowserService(
+        policy, router, twcampus, {AccessStrategy.WEB_SEARCH: web}, fallback=web
+    )
 
     sources = get_known_sources()
     print(f"Live smoke test — {len(sources)} 個內建教育來源")

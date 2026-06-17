@@ -21,13 +21,13 @@
 ```json
 [
   {
-    "name": "臺大開放式課程 NTU OCW",
-    "reason": "國立臺灣大學開放式課程，提供大學級影片講義",
-    "official_url": "https://ocw.aca.ntu.edu.tw",
-    "education_stages": ["大學"],
-    "categories": ["開放課程", "大學課程", "影片", "講義"],
+    "name": "教育大市集",
+    "reason": "教育部數位內容入口，提供各級教案、多媒體教材與學習活動",
+    "official_url": "https://market.cloud.edu.tw",
+    "education_stages": ["國小", "國中", "高中"],
+    "categories": ["教案", "多媒體", "學習活動", "教材"],
     "directory_source": "TWCampus",
-    "access_strategy": "WEB_SEARCH"
+    "access_strategy": "OFFICIAL_API"
   }
 ]
 ```
@@ -39,28 +39,30 @@
 
 | 參數 | 型別 | 說明 |
 |------|------|------|
-| `source` | `str` | 平台名稱（如「臺大開放式課程 NTU OCW」）或官方 URL |
+| `source` | `str` | 平台名稱（如「教育大市集」）或官方 URL |
 | `query` | `str` | 搜尋關鍵字 |
 | `max_results` | `int` | 預設 5，上限 5 |
 
 <details>
 <summary>回傳範例</summary>
 
+教育大市集為 `OFFICIAL_API` 來源，browse 走官方 v2 API，故 `education_stage`（來自 API 的 `edugrade`）與 `subject`（來自 `domain`）為**有值**結構化欄位：
+
 ```json
 {
-  "source": "臺大開放式課程 NTU OCW",
-  "official_url": "https://ocw.aca.ntu.edu.tw",
-  "query": "資訊",
+  "source": "教育大市集",
+  "official_url": "https://market.cloud.edu.tw",
+  "query": "理化",
   "total_returned": 5,
   "results": [
     {
-      "title": "機動學",
-      "url": "https://ocw.aca.ntu.edu.tw/courses/113S106",
+      "title": "理化反應與能量",
+      "url": "https://market.cloud.edu.tw/resources/1234567",
       "summary": "…",
-      "source_name": "臺大開放式課程 NTU OCW",
-      "source_url": "https://ocw.aca.ntu.edu.tw",
-      "education_stage": null,
-      "subject": null
+      "source_name": "教育大市集",
+      "source_url": "https://market.cloud.edu.tw",
+      "education_stage": "國中",
+      "subject": "自然科學、理化"
     }
   ]
 }
@@ -81,12 +83,14 @@
 <details>
 <summary>回傳範例</summary>
 
+與 browse 不同，`read` 走 web_search 的 HTML 擷取（best-effort）：即使是 `OFFICIAL_API` 來源，單頁的 `education_stage` / `subject` 仍可能為 `null`（官方 API 無 by-id 詳情端點，read 委派給 HTML reader）。
+
 ```json
 {
-  "url": "https://ocw.aca.ntu.edu.tw/courses/mooc0073",
-  "title": "Operations Research (4): Capstone Project - 臺大開放式課程",
-  "summary": "… 授課日期｜2025 年 10 月 … 開課單位：Information Management（資訊管理學系）…",
-  "publisher": "NTU OpenCourseWare",
+  "url": "https://market.cloud.edu.tw/resources/1234567",
+  "title": "理化反應與能量 - 教育大市集",
+  "summary": "… 介紹理化反應中的能量變化，適用國中自然領域教學 …",
+  "publisher": "教育大市集",
   "education_stage": null,
   "subject": null,
   "license": null

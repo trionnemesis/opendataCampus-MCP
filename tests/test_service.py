@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from opendata_campus_mcp.contracts import (
+    AccessStrategy,
     BrowseRequest,
     DiscoveryRequest,
     EducationSource,
@@ -69,7 +70,10 @@ def mock_web() -> AsyncMock:
 
 @pytest.fixture()
 def service(policy: BrowserPolicy, router: SourceRouter, mock_twcampus: AsyncMock, mock_web: AsyncMock) -> EdBrowserService:
-    return EdBrowserService(policy, router, mock_twcampus, mock_web)
+    return EdBrowserService(
+        policy, router, mock_twcampus,
+        {AccessStrategy.WEB_SEARCH: mock_web}, fallback=mock_web,
+    )
 
 
 # ── discover_education_sources ────────────────────────────────────────────────
@@ -117,7 +121,10 @@ async def test_discover_falls_back_to_twcampus_when_insufficient(
     mock_twcampus = AsyncMock()
     mock_twcampus.discover.return_value = [live_source]
 
-    svc = EdBrowserService(policy, router, mock_twcampus, mock_web)
+    svc = EdBrowserService(
+        policy, router, mock_twcampus,
+        {AccessStrategy.WEB_SEARCH: mock_web}, fallback=mock_web,
+    )
     req = DiscoveryRequest(query="zzz_no_local_match", max_sources=3)
     await svc.discover_sources(req)
 
@@ -161,6 +168,79 @@ async def test_browse_source_unavailable_propagates(service: EdBrowserService, m
     req = BrowseRequest(source_name_or_url="教育大市集", query="教材", max_results=5)
     with pytest.raises(SourceUnavailableError):
         await service.browse_source(req)
+
+
+# ── adapter 分派（access_strategy → adapter registry）─────────────────────────
+
+@pytest.mark.asyncio
+async def test_browse_dispatches_by_access_strategy(policy: BrowserPolicy, mock_twcampus: AsyncMock):
+    """source.access_strategy 命中 registry → 走對應 adapter，不走 fallback。"""
+    api_source = EducationSource(
+        name="API 平台",
+        official_url="https://api.example.edu.tw",
+        access_strategy=AccessStrategy.OFFICIAL_API,
+    )
+    router = SourceRouter({api_source.name: api_source})
+    mock_api = AsyncMock()
+    mock_api.browse.return_value = []
+    mock_web = AsyncMock()
+    mock_web.browse.return_value = []
+    svc = EdBrowserService(
+        policy, router, mock_twcampus,
+        {AccessStrategy.OFFICIAL_API: mock_api, AccessStrategy.WEB_SEARCH: mock_web},
+        fallback=mock_web,
+    )
+    await svc.browse_source(BrowseRequest(source_name_or_url="API 平台", query="x", max_results=5))
+    mock_api.browse.assert_called_once()
+    mock_web.browse.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_browse_falls_back_when_strategy_unregistered(policy: BrowserPolicy, mock_twcampus: AsyncMock):
+    """source.access_strategy 未註冊於 registry → 落到 fallback adapter。"""
+    api_source = EducationSource(
+        name="API 平台",
+        official_url="https://api.example.edu.tw",
+        access_strategy=AccessStrategy.OFFICIAL_API,
+    )
+    router = SourceRouter({api_source.name: api_source})
+    mock_web = AsyncMock()
+    mock_web.browse.return_value = []
+    svc = EdBrowserService(
+        policy, router, mock_twcampus,
+        {AccessStrategy.WEB_SEARCH: mock_web},
+        fallback=mock_web,
+    )
+    await svc.browse_source(BrowseRequest(source_name_or_url="API 平台", query="x", max_results=5))
+    mock_web.browse.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_browse_adhoc_url_uses_fallback(service: EdBrowserService, mock_web: AsyncMock):
+    """未知 URL 建立的 ad-hoc WEB_SEARCH source → 走 fallback adapter。"""
+    mock_web.browse.return_value = []
+    await service.browse_source(
+        BrowseRequest(source_name_or_url="https://unknown.edu.tw", query="x", max_results=5)
+    )
+    mock_web.browse.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_no_key_routes_market_to_web_search(
+    policy: BrowserPolicy,
+    router: SourceRouter,
+    mock_twcampus: AsyncMock,
+    mock_web: AsyncMock,
+):
+    """無 key 組裝（registry 無 OFFICIAL_API）→ 教育大市集（OFFICIAL_API source）落回 web_search。"""
+    svc = EdBrowserService(
+        policy, router, mock_twcampus,
+        {AccessStrategy.WEB_SEARCH: mock_web}, fallback=mock_web,
+    )
+    await svc.browse_source(
+        BrowseRequest(source_name_or_url="教育大市集", query="數學", max_results=5)
+    )
+    mock_web.browse.assert_called_once()
 
 
 # ── read_education_resource ───────────────────────────────────────────────────

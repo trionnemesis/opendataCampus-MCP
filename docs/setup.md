@@ -22,7 +22,7 @@ pip install -e ".[headless]"
 playwright install chromium
 ```
 
-執行階段相依套件：`fastmcp>=0.2.0`、`httpx>=0.27`、`beautifulsoup4>=4.12`。
+執行階段相依套件：`fastmcp>=0.2.0`、`httpx>=0.27`、`beautifulsoup4>=4.12`、`truststore`（用系統憑證庫解決台灣 .edu.tw 政府憑證在較新 OpenSSL 下的驗證問題）。
 
 > 是否需要 `[headless]`？多數內建平台為 server-rendered，`httpx + BeautifulSoup` 已足夠。詳見 [無頭瀏覽策略](headless.md)。
 
@@ -77,31 +77,46 @@ python -m opendata_campus_mcp.mcp_server
 
 ---
 
+## 教育大市集官方 API Key（選用）
+
+教育大市集為 `OFFICIAL_API` 來源。提供 `EDUMARKET_API_KEY` 後，browse 會改走官方 v2 REST API 並回傳結構化的學制 / 領域欄位；**無 key 時教育大市集自動降級回 web_search，其餘來源不受影響**。
+
+申請步驟：登入 [market.cloud.edu.tw](https://market.cloud.edu.tw) → 會員中心 → 資料設定 → API應用服務 → 取得個人 API KEY，再以環境變數 `EDUMARKET_API_KEY` 傳入 server。
+
+**Claude Desktop**：在對應 `mcpServers` 項加入 `env`：
+
+```json
+{
+  "mcpServers": {
+    "opendata-campus": {
+      "command": "/絕對路徑/opendataCampus-MCP/.venv/bin/opendata-campus-mcp",
+      "env": { "EDUMARKET_API_KEY": "<key>" }
+    }
+  }
+}
+```
+
+**Claude Code**：以 `-e` 傳入環境變數：
+
+```bash
+claude mcp add opendata-campus -e EDUMARKET_API_KEY=<key> -- /絕對路徑/opendataCampus-MCP/.venv/bin/opendata-campus-mcp
+```
+
+---
+
 ## 測試
 
 ```bash
-# 單元測試（26 個；service / browser_policy / source_router）— CI 在此 gate
+# 單元測試（41 個；service / browser_policy / source_router / edumarket）— CI 在此 gate
 pytest tests/ -v
 
-# 端對端整合測試（需網路，實際抓取 NTU OCW）
-python scripts/integration_e2e.py
+# 端對端整合測試（教育大市集官方 API，需 EDUMARKET_API_KEY；未設時自動跳過）
+EDUMARKET_API_KEY=<key> python scripts/integration_e2e.py
 
-# 全來源 live smoke test（需網路，對 10 個內建來源各跑一次 browse 並回報健康度）
+# 全來源 live smoke test（需網路，對 9 個內建來源各跑一次 browse 並回報健康度）
 python scripts/smoke_sources.py
 ```
 
 `scripts/smoke_sources.py` 是維護者用的 live 診斷工具（**非** CI gate）：對每個內建來源跑一次 `browse`，依連線結果標記 ✅ OK / ⚠️ EMPTY / 🔒 LOGIN / ❌ UNAVAILABLE，快速看出哪些來源的搜尋 / 解析器仍正常。最近實測見 [來源 live 健康度](sources.md#來源-live-健康度)。
 
-整合測試實際抓取結果（真實遠端，非快取）：
-
-```
-課程名稱 : Operations Research (4): Capstone Project
-          作業研究（四）：專題實作
-開課單位 : Information Management（資訊管理學系）
-授課日期 : 2025 年 10 月
-授課教師 : Ling-Chieh Kung（孔令傑）
-平台     : 臺大開放式課程 NTU OCW
-URL      : https://ocw.aca.ntu.edu.tw/courses/mooc0073
-```
-
-> 抓取真實性驗證：對同一頁多次 `read`，頁面「本月點閱」計數隨抓取單調遞增，確認為即時遠端 GET 而非靜態快取或靜默降級。
+`scripts/integration_e2e.py` 以教育大市集官方 API 走完整三段式流程：`discover`（找到教育大市集）→ `browse`（官方 v2 API 回傳含 `education_stage` / `subject` 的結構化結果）→ `read`（HTML best-effort 讀取單頁摘要）。需設 `EDUMARKET_API_KEY` 才會實際發送請求，未設時跳過。

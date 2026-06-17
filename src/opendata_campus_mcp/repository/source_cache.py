@@ -16,7 +16,7 @@ _CATALOG: list[EducationSource] = [
         description="教育部數位內容入口，提供各級教案、多媒體教材與學習活動",
         categories=("教案", "多媒體", "學習活動", "教材"),
         education_stages=("國小", "國中", "高中"),
-        access_strategy=AccessStrategy.WEB_SEARCH,
+        access_strategy=AccessStrategy.OFFICIAL_API,
     ),
     EducationSource(
         name="因材網",
@@ -72,14 +72,6 @@ _CATALOG: list[EducationSource] = [
         description="非營利線上學習平台，提供數學、自然、語文等科目影片與練習",
         categories=("影片教學", "練習題", "數學", "自然", "語文"),
         education_stages=("國小", "國中", "高中"),
-        access_strategy=AccessStrategy.WEB_SEARCH,
-    ),
-    EducationSource(
-        name="臺大開放式課程 NTU OCW",
-        official_url="https://ocw.aca.ntu.edu.tw",
-        description="國立臺灣大學開放式課程，提供大學級影片講義",
-        categories=("開放課程", "大學課程", "影片", "講義"),
-        education_stages=("大學",),
         access_strategy=AccessStrategy.WEB_SEARCH,
     ),
     EducationSource(

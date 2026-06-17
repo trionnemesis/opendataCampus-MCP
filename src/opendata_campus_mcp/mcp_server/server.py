@@ -9,13 +9,18 @@
 """
 from __future__ import annotations
 
+import os
+
 from fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from opendata_campus_mcp.adapters.edumarket import EduMarketApiAdapter
 from opendata_campus_mcp.adapters.twcampus import TwCampusDirectoryAdapter
 from opendata_campus_mcp.adapters.web_search import WebSearchAdapter
 from opendata_campus_mcp.contracts import (
+    AccessStrategy,
+    BrowseAdapter,
     BrowseRequest,
     DiscoveryRequest,
     LoginRequiredError,
@@ -50,7 +55,16 @@ def build_server() -> FastMCP:
     router = SourceRouter(get_known_sources())
     twcampus = TwCampusDirectoryAdapter(policy)
     web = WebSearchAdapter()
-    service = EdBrowserService(policy, router, twcampus, web)
+    adapters: dict[AccessStrategy, BrowseAdapter] = {
+        AccessStrategy.WEB_SEARCH: web,
+    }
+    # 有 EDUMARKET_API_KEY 才註冊教育大市集官方 API；否則該來源自然降級回 web_search
+    api_key = os.environ.get("EDUMARKET_API_KEY")
+    if api_key:
+        adapters[AccessStrategy.OFFICIAL_API] = EduMarketApiAdapter(
+            api_key, html_reader=web
+        )
+    service = EdBrowserService(policy, router, twcampus, adapters, fallback=web)
 
     mcp = FastMCP("opendata-campus-mcp", instructions=_INSTRUCTIONS)
 

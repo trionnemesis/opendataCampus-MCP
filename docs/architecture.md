@@ -17,16 +17,18 @@
 │            source_router（關鍵字評分 + 階段過濾 + 路由）│
 ├────────────────────────────────────────────────────────┤
 │  adapters/    twcampus（目錄）· web_search（搜尋/讀取） │
+│               edumarket（教育大市集官方 API）           │
+│               _http（共用 SSL context）                 │
 │               headless（Playwright 後備，預設停用）     │
-│  repository/  source_cache（10 平台靜態目錄）           │
+│  repository/  source_cache（9 平台靜態目錄）            │
 │  contracts.py  跨層 DTO / Enum / Error / Protocol       │
 └───────────────────────┬────────────────────────────────┘
-                        │ httpx GET + BeautifulSoup
+                        │ httpx GET + BeautifulSoup / 官方 API
                         ▼
-        台灣官方教育平台（NTU OCW、教育大市集、因材網 …）
+        台灣官方教育平台（教育大市集、因材網、均一 …）
 ```
 
-各層僅依賴 `contracts.py` 的型別，符合依賴反轉；`service.py` 以建構子注入 policy / router / adapter，方便測試以 mock 替換。
+各層僅依賴 `contracts.py` 的型別，符合依賴反轉；`service.py` 以建構子注入 policy / router / adapter，並依 `source.access_strategy` 從 adapter registry 分派（找不到對應策略則落回 fallback web_search），方便測試以 mock 替換。
 
 ---
 
@@ -39,7 +41,8 @@
 discover_education_sources    本地目錄評分排序 → 正分不足時補 TWCampus → 合併去重
    │                          回傳最相關的官方平台（含 official_url、適用階段）
    ▼
-browse_education_source       httpx + BeautifulSoup 在指定平台搜尋
+browse_education_source       依 source.access_strategy 分派 adapter：OFFICIAL_API
+   │                          來源走官方 API，其餘走 httpx + BeautifulSoup
    │                          回傳 results[]（title / url / summary / 來源標記）
    ▼
 read_education_resource       讀取單一資源頁面（摘要 ≤ 500 字元，不存全文）
@@ -74,19 +77,22 @@ opendataCampus-MCP/
 │   ├── adapters/
 │   │   ├── twcampus.py             # TWCampus 目錄導航（httpx）
 │   │   ├── web_search.py           # 官方平台搜尋 / 讀取（httpx + BS4）
+│   │   ├── edumarket.py            # 教育大市集官方 API adapter（OFFICIAL_API）
+│   │   ├── _http.py                # 共用 SSL context（台灣政府憑證 workaround）
 │   │   └── headless.py             # Playwright 後備（預設停用）
 │   ├── repository/
-│   │   └── source_cache.py         # 10 個已知台灣教育平台目錄
+│   │   └── source_cache.py         # 9 個已知台灣教育平台目錄
 │   └── mcp_server/
 │       ├── __main__.py             # python -m 進入點
-│       ├── service.py              # EdBrowserService（協調層）
-│       └── server.py               # FastMCP 工具定義
+│       ├── service.py              # EdBrowserService（依 access_strategy 分派 adapter）
+│       └── server.py               # FastMCP 工具定義（key-gated 組裝 adapter）
 ├── tests/
 │   ├── test_browser_policy.py
 │   ├── test_source_router.py
-│   └── test_service.py
+│   ├── test_service.py
+│   └── test_edumarket.py           # 教育大市集 adapter（httpx.MockTransport，離線）
 ├── scripts/
-│   ├── integration_e2e.py          # 端對端整合測試（NTU OCW）
+│   ├── integration_e2e.py          # 端對端整合測試（教育大市集官方 API）
 │   └── smoke_sources.py            # 全來源 live 健康度 smoke test
 └── pyproject.toml
 ```
@@ -109,7 +115,7 @@ opendataCampus-MCP/
 | 需求 | 做法 |
 |------|------|
 | **新增教育平台** | 在 [`source_cache.py`](../src/opendata_campus_mcp/repository/source_cache.py) 的 `_CATALOG` 加一筆 `EducationSource`，無需改動其他程式碼。 |
-| **新增存取策略** | 在 `contracts.AccessStrategy` 加一個 enum 值（含 `priority`），並實作對應 adapter（符合 `DirectoryAdapter` / `BrowseAdapter` Protocol）。 |
+| **新增存取策略** | 在 `contracts.AccessStrategy` 加一個 enum 值（含 `priority`），並實作對應 adapter（符合 `DirectoryAdapter` / `BrowseAdapter` Protocol）。已落實範例：`edumarket.py` 以 `OFFICIAL_API` 策略接教育大市集官方 API。 |
 | **調整路由優先序** | 修改 `AccessStrategy.priority` 與 `source_router.PRIORITY_ORDER`。 |
 
 路由優先序：`OFFICIAL_API`(0) > `OPEN_DATA`(1) > `WEB_SEARCH`(2) > `TWCAMPUS_DIRECTORY`(3) > `HEADLESS_BROWSER`(4)。

@@ -11,9 +11,9 @@ import logging
 from typing import Any
 
 from opendata_campus_mcp.adapters.twcampus import TwCampusDirectoryAdapter
-from opendata_campus_mcp.adapters.web_search import WebSearchAdapter
 from opendata_campus_mcp.contracts import (
     AccessStrategy,
+    BrowseAdapter,
     BrowseRequest,
     DiscoveryRequest,
     EducationSource,
@@ -32,12 +32,14 @@ class EdBrowserService:
         policy: BrowserPolicy,
         router: SourceRouter,
         twcampus: TwCampusDirectoryAdapter,
-        web: WebSearchAdapter,
+        adapters: dict[AccessStrategy, BrowseAdapter],
+        fallback: BrowseAdapter,
     ) -> None:
         self._policy = policy
         self._router = router
         self._twcampus = twcampus
-        self._web = web
+        self._adapters = adapters
+        self._fallback = fallback
 
     # ── discover_education_sources ────────────────────────────────────────────
 
@@ -85,7 +87,8 @@ class EdBrowserService:
                 access_strategy=AccessStrategy.WEB_SEARCH,
             )
 
-        results = await self._web.browse(source, request)
+        adapter = self._adapters.get(source.access_strategy, self._fallback)
+        results = await adapter.browse(source, request)
         return {
             "source": source.name,
             "official_url": source.official_url,
@@ -108,7 +111,7 @@ class EdBrowserService:
     # ── read_education_resource ───────────────────────────────────────────────
 
     async def read_resource(self, request: ReadRequest) -> dict[str, Any]:
-        return await self._web.read(request.url, list(request.extract))
+        return await self._fallback.read(request.url, list(request.extract))
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
