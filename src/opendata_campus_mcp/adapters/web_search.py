@@ -182,26 +182,46 @@ class WebSearchAdapter:
                 result["summary"] = " ".join(texts)[:_MAX_SUMMARY_CHARS]
 
         if "publisher" in extract:
-            meta = soup.find(
-                "meta",
-                attrs={"name": lambda n: n in ("author", "publisher", "creator")},
+            result["publisher"] = _meta(
+                soup, "DC.Publisher", "og:site_name", "author", "publisher", "creator", "DC.Creator"
             )
-            result["publisher"] = str(meta["content"]) if meta and meta.get("content") else None  # type: ignore[index]
 
         if "education_stage" in extract:
-            result["education_stage"] = None  # 需平台特定解析
+            # 實測現有來源皆無可靠 educationLevel meta；保留防禦性查詢，命不到即 None（不臆造）
+            result["education_stage"] = _meta(soup, "dc.educationLevel", "dcterms.educationLevel")
 
         if "subject" in extract:
-            result["subject"] = None
+            # 僅取 Dublin Core subject；不把 SEO keywords 當學科（實測 keywords≠subject）
+            result["subject"] = _meta(soup, "DC.Subject", "dc.subject", "dcterms.subject")
 
         if "license" in extract:
-            meta = soup.find(
-                "meta",
-                attrs={"name": lambda n: n in ("license", "rights", "dc.rights")},
-            )
-            result["license"] = str(meta["content"]) if meta and meta.get("content") else None  # type: ignore[index]
+            lic = _meta(soup, "DC.Rights", "dc.rights", "license", "rights", "copyright")
+            if not lic:
+                for link in soup.find_all("link", href=True):
+                    rel = link.get("rel")
+                    rel_str = " ".join(rel) if isinstance(rel, list) else str(rel or "")
+                    if "license" in rel_str.lower():
+                        lic = str(link["href"])
+                        break
+            result["license"] = lic
 
         return result
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+
+def _meta(soup: BeautifulSoup, *names: str) -> str | None:
+    """case-insensitive 取第一個命中的 <meta name|property> content；空值/無 → None。
+
+    跨來源 meta 萃取共用：統一 lower-case 比對（解決 BS4 屬性值大小寫敏感）、
+    空字串視為未命中（NLPI 等的 DC.* 常為空），不臆造。
+    """
+    wanted = {n.lower() for n in names}
+    for tag in soup.find_all("meta"):
+        key = (tag.get("name") or tag.get("property") or "").lower()
+        if key in wanted:
+            content = (tag.get("content") or "").strip()
+            if content:
+                return content
+    return None

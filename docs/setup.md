@@ -107,13 +107,13 @@ claude mcp add opendata-campus -e EDUMARKET_API_KEY=<key> -- /絕對路徑/opend
 ## 測試
 
 ```bash
-# 單元測試（65 個；service / browser_policy / source_router / edumarket / ceec_exam）— CI 在此 gate
+# 單元測試（82 個；service / browser_policy / source_router / edumarket / opendata / web_search / ceec_exam）— CI 在此 gate
 pytest tests/ -v
 
 # 端對端整合測試（教育大市集官方 API，需 EDUMARKET_API_KEY；未設時自動跳過）
 EDUMARKET_API_KEY=<key> python scripts/integration_e2e.py
 
-# 全來源 live smoke test（需網路，對 9 個內建來源各跑一次 browse 並回報健康度）
+# 全來源 live smoke test（需網路，對 10 個內建來源各跑一次 browse 並回報健康度）
 python scripts/smoke_sources.py
 ```
 

@@ -17,6 +17,7 @@
 | 大學入學考試中心 CEEC | 高中 | https://www.ceec.edu.tw |
 | 均一教育平台 | 國小 / 國中 / 高中 | https://www.junyiacademy.org |
 | 國教院課程資源網 | 國小 / 國中 / 高中 | https://www.naer.edu.tw |
+| 政府資料開放平臺 | 全階段（統計 / 名錄） | https://data.gov.tw（`OPEN_DATA`） |
 
 ---
 
@@ -32,12 +33,41 @@
 | 國立公共資訊圖書館 | ✅ OK | browse 回傳 5 筆 |
 | 大學入學考試中心 CEEC | ✅ OK | browse 回傳 5 筆 |
 | 均一教育平台 | ✅ OK | browse 回傳 5 筆 |
+| 國教院課程資源網 | ✅ OK | browse 回傳 5 筆（前次快照曾連線中斷，live 狀態不穩） |
+| 政府資料開放平臺 | ✅ OK | `OPEN_DATA` browse 回傳 3 筆（本地 catalog，不打 API） |
 | 教育大市集 | ❌ 無 key 降級 | 未設 `EDUMARKET_API_KEY` 時走 web_search 降級，該搜尋頁回 HTTP 404 |
 | CIRN | ❌ 憑證不符 | `cirn.k12ea.gov.tw` 憑證名稱與輸入網域不符 |
-| 國教院課程資源網 | ❌ 連線中斷 | Server disconnected without sending a response |
+
+> OK=8 / FAIL=2（10 來源）。
 
 - **教育大市集**：上表為無 key 快照故降級；**設 `EDUMARKET_API_KEY` 後 browse 走官方 v2 API 即正常**（見 [安裝與設定](setup.md#教育大市集官方-api-key選用)）。
 - 此表為單一環境、無 key 情境的快照，僅供參考；請以你自己環境執行 `smoke_sources.py` 的結果為準。
+
+---
+
+## 政府資料開放平臺（`OPEN_DATA`）
+
+[政府資料開放平臺](https://data.gov.tw)（data.gov.tw）是 `OPEN_DATA` 存取策略的第一個來源，透過既有 `browse_education_source` / `read_education_resource` 工具存取（service 依 `access_strategy` 分派到 `OpenDataApiAdapter`，**非新增 MCP 工具**）。dataset 清單為手動驗證的本地 catalog，定義於 [`repository/opendata_catalog.py`](../src/opendata_campus_mcp/repository/opendata_catalog.py)，與平台層的 `source_cache.py` 分離。
+
+| 項目 | 說明 |
+|------|------|
+| **browse** | 在本地 catalog 做關鍵字過濾（**不打 API**，省請求）→ 回傳 dataset 連結（`url` 形如 `https://data.gov.tw/dataset/{id}`，含 `education_stage` / `subject`） |
+| **read** | 抽 dataset id → `GET https://data.gov.tw/api/v2/rest/dataset/{id}` → 回傳 dict，**額外含 `resources` 陣列**（每筆 `{format, download_url}` 指向 stats.moe.gov.tw 的 CSV / JSON 實際下載點）+ `license` 解碼 |
+| **誠實定位** | 8 dataset 中 **6 筆教育統計**（學生數 / 教師數 / 比率 / 概況）+ **2 筆名錄**（校院名錄 / 高中職名錄）；屬**統計 / 名錄類開放資料，非教材或題庫** |
+| 授權 | 皆教育部、[政府資料開放授權條款-第1版 (OGDL v1.0)](https://data.gov.tw)，附 CSV / JSON 下載點 |
+
+8 個已驗證 dataset：
+
+| dataset id | 名稱 | 類別 |
+|------------|------|------|
+| 6091 | 大專校院名錄 | 名錄 |
+| 6089 | 一般高級中等學校名錄 | 名錄 |
+| 6288 | 大專校院圖書館統計 | 統計 |
+| 9624 | 大專校院各校科系別專任教師數 | 統計 |
+| 40121 | 各級學校縣市別學生人數 | 統計 |
+| 31437 | 各級學校概況 | 統計 |
+| 31438 | 各級學校年齡別學生人數 | 統計 |
+| 40118 | 各級學校學生人數占年底人口比率 | 統計 |
 
 ---
 

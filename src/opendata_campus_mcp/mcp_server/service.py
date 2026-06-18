@@ -117,7 +117,14 @@ class EdBrowserService:
     # ── read_education_resource ───────────────────────────────────────────────
 
     async def read_resource(self, request: ReadRequest) -> dict[str, Any]:
-        return await self._fallback.read(request.url, list(request.extract))
+        # 依資源頁 URL host 找來源 → 取對應 adapter（OPEN_DATA dataset 頁走 OpenData
+        # adapter 的結構化 read；其餘 / 未知 host 落 fallback 的 HTML 擷取）。
+        source = self._router.find_by_host(request.url)
+        adapter = (
+            self._adapters.get(source.access_strategy, self._fallback)
+            if source else self._fallback
+        )
+        return await adapter.read(request.url, list(request.extract))
 
     # ── search_exam_questions ─────────────────────────────────────────────────
 

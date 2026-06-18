@@ -17,6 +17,7 @@ from starlette.responses import JSONResponse
 
 from opendata_campus_mcp.adapters.ceec_exam import CeecExamAdapter
 from opendata_campus_mcp.adapters.edumarket import EduMarketApiAdapter
+from opendata_campus_mcp.adapters.opendata import OpenDataApiAdapter
 from opendata_campus_mcp.adapters.twcampus import TwCampusDirectoryAdapter
 from opendata_campus_mcp.adapters.web_search import WebSearchAdapter
 from opendata_campus_mcp.contracts import (
@@ -50,6 +51,7 @@ _INSTRUCTIONS = """\
   - 不執行排程爬取；不遞迴導航；不儲存完整 HTML / 不下載試題 PDF 全文
   - 所有結果均包含來源標記
   - 不嘗試登入或繞過任何存取控制；考古題僅支援 CEEC 學測/分科,會考因 robots.txt 排除
+  - 政府資料開放平臺提供結構化教育統計/名錄類開放資料（附 CSV/JSON 下載點），非學習教材
 """
 
 _SUPPORTED_EXAM_TYPES = ("學測", "分科測驗")
@@ -62,6 +64,7 @@ def build_server() -> FastMCP:
     web = WebSearchAdapter()
     adapters: dict[AccessStrategy, BrowseAdapter] = {
         AccessStrategy.WEB_SEARCH: web,
+        AccessStrategy.OPEN_DATA: OpenDataApiAdapter(),  # data.gov.tw,無 key,無條件註冊
     }
     # 有 EDUMARKET_API_KEY 才註冊教育大市集官方 API；否則該來源自然降級回 web_search
     api_key = os.environ.get("EDUMARKET_API_KEY")

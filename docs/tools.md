@@ -39,9 +39,11 @@
 
 | 參數 | 型別 | 說明 |
 |------|------|------|
-| `source` | `str` | 平台名稱（如「教育大市集」）或官方 URL |
+| `source` | `str` | 平台名稱（如「教育大市集」「政府資料開放平臺」）或官方 URL |
 | `query` | `str` | 搜尋關鍵字 |
 | `max_results` | `int` | 預設 5，上限 5 |
+
+> **政府資料開放平臺（`OPEN_DATA`）** 亦為可 browse 的來源之一：在本地 dataset catalog 做關鍵字過濾（**不打 API**），回傳 dataset 連結（`url` 形如 `https://data.gov.tw/dataset/{id}`，含 `education_stage` / `subject`）。
 
 <details>
 <summary>回傳範例</summary>
@@ -94,6 +96,28 @@
   "education_stage": null,
   "subject": null,
   "license": null
+}
+```
+</details>
+
+**OPEN_DATA 來源（政府資料開放平臺）的 `read`**：`read` 依 URL host 分派 adapter，data.gov.tw 的 dataset URL 走 `OPEN_DATA` adapter 的結構化 read（`GET https://data.gov.tw/api/v2/rest/dataset/{id}`），**額外回傳 `resources` 陣列**（每筆 `{format, download_url}` 指向 stats.moe.gov.tw 的 CSV / JSON 實際下載點），並解碼 `license`。這是 open data 的核心價值：唯一提供結構化、附實際下載點的來源。
+
+<details>
+<summary>回傳範例（OPEN_DATA 結構化 read）</summary>
+
+```json
+{
+  "url": "https://data.gov.tw/dataset/6091",
+  "title": "大專校院名錄",
+  "summary": "全臺灣大專校院通訊資料",
+  "publisher": "教育部統計處",
+  "education_stage": "大學",
+  "subject": "名錄、大專、大專校院",
+  "license": "政府資料開放授權條款-第1版 (OGDL v1.0)",
+  "resources": [
+    {"format": "CSV", "download_url": "https://stats.moe.gov.tw/files/opendata/u1_new.csv"},
+    {"format": "JSON", "download_url": "https://stats.moe.gov.tw/files/opendata/u1_new.json"}
+  ]
 }
 ```
 </details>

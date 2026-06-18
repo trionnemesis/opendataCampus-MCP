@@ -1,4 +1,4 @@
-"""Live smoke test — 對全部 9 個內建教育來源各跑一次 browse，回報可達性與抓取健康度。
+"""Live smoke test — 對全部 10 個內建教育來源各跑一次 browse，回報可達性與抓取健康度。
 
 定位：維護者用的「live 診斷工具」，非 CI gate。實際連線台灣教育平台，
 結果可能因各站結構改版、WAF、網路波動而異；用來快速看出哪些來源的
@@ -22,6 +22,7 @@ import sys
 
 sys.path.insert(0, "src")
 
+from opendata_campus_mcp.adapters.opendata import OpenDataApiAdapter
 from opendata_campus_mcp.adapters.twcampus import TwCampusDirectoryAdapter
 from opendata_campus_mcp.adapters.web_search import WebSearchAdapter
 from opendata_campus_mcp.contracts import (
@@ -46,6 +47,7 @@ SMOKE_QUERIES: dict[str, str] = {
     "大學入學考試中心 CEEC": "學測",
     "均一教育平台": "數學",
     "國教院課程資源網": "素養",
+    "政府資料開放平臺": "學生人數",
 }
 
 _DEFAULT_QUERY = "學習"
@@ -76,8 +78,11 @@ async def main() -> int:
     router = SourceRouter(get_known_sources())
     twcampus = TwCampusDirectoryAdapter(policy)
     web = WebSearchAdapter()
+    opendata = OpenDataApiAdapter()
     svc = EdBrowserService(
-        policy, router, twcampus, {AccessStrategy.WEB_SEARCH: web}, fallback=web
+        policy, router, twcampus,
+        {AccessStrategy.WEB_SEARCH: web, AccessStrategy.OPEN_DATA: opendata},
+        fallback=web,
     )
 
     sources = get_known_sources()
@@ -96,6 +101,7 @@ async def main() -> int:
 
     await twcampus.aclose()
     await web.aclose()
+    await opendata.aclose()
 
     ok = sum(1 for s, _ in rows if s == "OK")
     empty = sum(1 for s, _ in rows if s == "EMPTY")

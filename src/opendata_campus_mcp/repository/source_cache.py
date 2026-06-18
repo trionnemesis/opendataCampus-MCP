@@ -82,6 +82,14 @@ _CATALOG: list[EducationSource] = [
         education_stages=("國小", "國中", "高中"),
         access_strategy=AccessStrategy.WEB_SEARCH,
     ),
+    EducationSource(
+        name="政府資料開放平臺",
+        official_url="https://data.gov.tw",
+        description="政府開放資料平臺，提供結構化教育統計與校院名錄類開放資料（附 CSV/JSON 下載點）；屬統計/名錄資料，非教材或題庫",
+        categories=("統計", "名錄", "學生數", "教師數", "學校概況"),
+        education_stages=(),  # 空：不分學階，避免被 discover 的 education_stage 硬過濾
+        access_strategy=AccessStrategy.OPEN_DATA,
+    ),
 ]
 
 

@@ -8,6 +8,8 @@ score_sources() 回傳 (score, source) pairs，分數 = 關鍵字命中數 + 科
 """
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from opendata_campus_mcp.contracts import AccessStrategy, DiscoveryRequest, EducationSource
 
 PRIORITY_ORDER: list[AccessStrategy] = [
@@ -29,6 +31,16 @@ class SourceRouter:
     def find_by_url(self, url: str) -> EducationSource | None:
         for s in self._sources.values():
             if s.official_url.rstrip("/") == url.rstrip("/"):
+                return s
+        return None
+
+    def find_by_host(self, url: str) -> EducationSource | None:
+        """以 URL host 比對來源（供 read 依資源頁 URL 分派 adapter）。"""
+        host = urlparse(url).netloc.lower()
+        if not host:
+            return None
+        for s in self._sources.values():
+            if urlparse(s.official_url).netloc.lower() == host:
                 return s
         return None
 

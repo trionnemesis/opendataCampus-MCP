@@ -18,15 +18,17 @@
 ├────────────────────────────────────────────────────────┤
 │  adapters/    twcampus（目錄）· web_search（搜尋/讀取） │
 │               edumarket（教育大市集官方 API）           │
+│               opendata（data.gov.tw open data API）     │
 │               ceec_exam（CEEC 考古題 listing，只回連結）│
 │               _http（共用 SSL context）                 │
 │               headless（Playwright 後備，預設停用）     │
-│  repository/  source_cache（9 平台靜態目錄）            │
+│  repository/  source_cache（10 平台靜態目錄）           │
+│               opendata_catalog（8 dataset 開放資料）    │
 │  contracts.py  跨層 DTO / Enum / Error / Protocol       │
 └───────────────────────┬────────────────────────────────┘
                         │ httpx GET + BeautifulSoup / 官方 API
                         ▼
-        台灣官方教育平台（教育大市集、因材網、均一 …）
+   台灣官方教育平台 + 政府資料開放平臺（data.gov.tw）
 ```
 
 各層僅依賴 `contracts.py` 的型別，符合依賴反轉；`service.py` 以建構子注入 policy / router / adapter，並依 `source.access_strategy` 從 adapter registry 分派（找不到對應策略則落回 fallback web_search），方便測試以 mock 替換。`ceec_exam` 是不經 `access_strategy` 路由的獨立垂直 adapter，由 `search_exam_questions` 直接呼叫，與 `twcampus` 共用同一 `BrowserPolicy`（per-domain 計數互不干擾）。
@@ -43,13 +45,18 @@ discover_education_sources    本地目錄評分排序 → 正分不足時補 TW
    │                          回傳最相關的官方平台（含 official_url、適用階段）
    ▼
 browse_education_source       依 source.access_strategy 分派 adapter：OFFICIAL_API
-   │                          來源走官方 API，其餘走 httpx + BeautifulSoup
+   │                          來源走官方 API；OPEN_DATA（政府資料開放平臺）在本地
+   │                          dataset catalog 做關鍵字過濾（不打 API，省請求）→ dataset
+   │                          連結；其餘走 httpx + BeautifulSoup
    │                          回傳 results[]（title / url / summary / 來源標記）
    ▼
-read_education_resource       讀取單一資源頁面（摘要 ≤ 500 字元，不存全文）
-   │
+read_education_resource       依 URL host 分派 adapter（SourceRouter.find_by_host）：
+   │                          data.gov.tw 的 dataset URL → OPEN_DATA adapter 結構化 read
+   │                          （by-id API，額外回 resources 下載點 + license 解碼）；
+   │                          其餘 host / 未知 → fallback web_search HTML 擷取
+   │                          （摘要 ≤ 500 字元，不存全文）
    ▼
-回傳：標題、摘要、來源 URL、發行者
+回傳：標題、摘要、來源 URL、發行者（OPEN_DATA 另含 resources[]）
 
 ─── 獨立垂直（不經三段式路由）──────────────────────────────
 search_exam_questions         CEEC 考古題（學測 / 分科測驗）→ CeecExamAdapter
@@ -86,11 +93,13 @@ opendataCampus-MCP/
 │   │   ├── twcampus.py             # TWCampus 目錄導航（httpx）
 │   │   ├── web_search.py           # 官方平台搜尋 / 讀取（httpx + BS4）
 │   │   ├── edumarket.py            # 教育大市集官方 API adapter（OFFICIAL_API）
+│   │   ├── opendata.py             # data.gov.tw open data API adapter（OPEN_DATA）
 │   │   ├── ceec_exam.py            # CEEC 考古題 listing adapter（httpx + BS4，只回連結）
 │   │   ├── _http.py                # 共用 SSL context（台灣政府憑證 workaround）
 │   │   └── headless.py             # Playwright 後備（預設停用）
 │   ├── repository/
-│   │   └── source_cache.py         # 9 個已知台灣教育平台目錄
+│   │   ├── source_cache.py         # 10 個已知台灣教育平台目錄
+│   │   └── opendata_catalog.py     # 8 個已驗證教育 open data dataset 目錄
 │   └── mcp_server/
 │       ├── __main__.py             # python -m 進入點
 │       ├── service.py              # EdBrowserService（依 access_strategy 分派 adapter）

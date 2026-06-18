@@ -316,3 +316,42 @@ async def test_search_exam_propagates_policy_error(
     )
     with pytest.raises(PolicyViolationError):
         await svc.search_exam_questions(ExamSearchRequest("學測"))
+
+
+# ── read 依 host 分派 adapter ──────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_read_dispatches_by_host(
+    policy: BrowserPolicy,
+    router: SourceRouter,
+    mock_twcampus: AsyncMock,
+    mock_web: AsyncMock,
+):
+    """data.gov.tw dataset URL → 依 host 命中 OPEN_DATA 來源 → 走對應 adapter,不走 fallback。"""
+    mock_open = AsyncMock()
+    mock_open.read.return_value = {"url": "https://data.gov.tw/dataset/6091", "resources": []}
+    svc = EdBrowserService(
+        policy, router, mock_twcampus,
+        {AccessStrategy.WEB_SEARCH: mock_web, AccessStrategy.OPEN_DATA: mock_open},
+        fallback=mock_web,
+    )
+    await svc.read_resource(ReadRequest(url="https://data.gov.tw/dataset/6091"))
+    mock_open.read.assert_awaited_once()
+    mock_web.read.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_read_unknown_host_uses_fallback(
+    policy: BrowserPolicy,
+    router: SourceRouter,
+    mock_twcampus: AsyncMock,
+    mock_web: AsyncMock,
+):
+    """未知 host → 落 fallback adapter。"""
+    mock_web.read.return_value = {"url": "https://unknown.example.com/x"}
+    svc = EdBrowserService(
+        policy, router, mock_twcampus,
+        {AccessStrategy.WEB_SEARCH: mock_web}, fallback=mock_web,
+    )
+    await svc.read_resource(ReadRequest(url="https://unknown.example.com/x"))
+    mock_web.read.assert_awaited_once()
