@@ -10,6 +10,18 @@ Feature: 單一教育資源讀取
     Then 應回傳 title 與 summary 欄位
     And 回傳物件包含 url 欄位且等於輸入的 URL
 
+  Scenario: 拒絕未知或不安全的資源 URL
+    Given URL 為非 HTTPS、含 userinfo、IP literal、localhost 或未知 host
+    When 呼叫 read_education_resource
+    Then 應回傳 {"error": "policy_violated", ...}
+    And 不應發送任何 HTTP 請求
+
+  Scenario: 重新導向前驗證目標 host
+    Given 已知來源回傳重新導向至未知 host
+    When 呼叫 read_education_resource
+    Then 應在跟隨重新導向前回傳 policy_violated
+    And 不應對未知 host 發送 HTTP 請求
+
   Scenario: 優先回傳 meta description 作為摘要
     Given 頁面含有 <meta name="description" content="...">
     When extract 包含 "summary"

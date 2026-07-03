@@ -15,6 +15,12 @@ Feature: 官方教育平台搜尋
     When 呼叫 browse_education_source
     Then 應解析出對應的已知平台並執行搜尋
 
+  Scenario: 拒絕未知平台 URL
+    Given source="https://unknown.example"
+    When 呼叫 browse_education_source
+    Then 應回傳 {"error": "policy_violated", ...}
+    And 不應發送任何 HTTP 請求
+
   Scenario: 回傳結果必須標註來源
     Given 任意來源平台
     When 搜尋完成

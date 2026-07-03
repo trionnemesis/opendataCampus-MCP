@@ -13,6 +13,12 @@ Feature: 瀏覽器使用政策
     Then 應拋出 RateLimitError
     And 錯誤訊息包含請求次數限制說明
 
+  Scenario: 一般 browse 與 read 共用同域請求限制
+    Given 過去 60 秒已透過 browse 或 read 對同一來源發送 3 次請求
+    When 嘗試透過任一工具發送第 4 次請求
+    Then 應拋出 RateLimitError
+    And 第 4 次 HTTP 請求不應送出
+
   Scenario: 不同網域的計數器獨立
     Given 對 twcampus.org 已發送 3 次請求（達上限）
     When 對 market.cloud.edu.tw 發送請求
