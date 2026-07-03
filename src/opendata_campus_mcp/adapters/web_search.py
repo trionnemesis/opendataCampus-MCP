@@ -17,6 +17,7 @@ import httpx
 from bs4 import BeautifulSoup, Tag
 
 from opendata_campus_mcp.adapters._http import build_ssl_context
+from opendata_campus_mcp.adapters.safe_http import safe_get
 from opendata_campus_mcp.contracts import (
     AccessStrategy,
     BrowseRequest,
@@ -25,6 +26,9 @@ from opendata_campus_mcp.contracts import (
     SearchResult,
     SourceUnavailableError,
 )
+from opendata_campus_mcp.domain.browser_policy import BrowserPolicy
+from opendata_campus_mcp.domain.url_policy import PublicEducationUrlPolicy
+from opendata_campus_mcp.repository.source_cache import get_known_sources
 
 log = logging.getLogger(__name__)
 
@@ -45,11 +49,20 @@ SEARCH_TEMPLATES: dict[str, str] = {
 class WebSearchAdapter:
     access_strategy = AccessStrategy.WEB_SEARCH
 
-    def __init__(self) -> None:
-        self._client = httpx.AsyncClient(
+    def __init__(
+        self,
+        policy: BrowserPolicy | None = None,
+        url_policy: PublicEducationUrlPolicy | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self._policy = policy or BrowserPolicy()
+        self._url_policy = url_policy or PublicEducationUrlPolicy.from_sources(
+            get_known_sources().values()
+        )
+        self._client = client or httpx.AsyncClient(
             headers={"User-Agent": _USER_AGENT},
             timeout=20.0,
-            follow_redirects=True,
+            follow_redirects=False,
             verify=build_ssl_context(),
         )
 
@@ -60,7 +73,12 @@ class WebSearchAdapter:
         log.debug("browse: GET %s", search_url)
 
         try:
-            resp = await self._client.get(search_url)
+            resp = await safe_get(
+                self._client,
+                search_url,
+                url_policy=self._url_policy,
+                browser_policy=self._policy,
+            )
         except httpx.TransportError as exc:
             raise SourceUnavailableError(source.name, source.official_url, str(exc))
 
@@ -79,7 +97,12 @@ class WebSearchAdapter:
     async def read(self, url: str, extract: list[str]) -> dict[str, Any]:
         log.debug("read: GET %s", url)
         try:
-            resp = await self._client.get(url)
+            resp = await safe_get(
+                self._client,
+                url,
+                url_policy=self._url_policy,
+                browser_policy=self._policy,
+            )
         except httpx.TransportError as exc:
             raise SourceUnavailableError("unknown", url, str(exc))
 

@@ -2,15 +2,17 @@
 
 ## Executive Summary
 
-This review focused on the MCP server security boundary and live data retrieval behavior. The project has a clear intent: route users to official public education resources, avoid bulk crawling, and return short summaries only. The implementation currently has strong structure, but the outbound-fetch boundary is too permissive for an MCP tool.
+This review focused on the MCP server security boundary and live data retrieval behavior. The original review found a permissive outbound-fetch boundary. The 2026-07-03 Phase 1 implementation closes direct arbitrary browse/read inputs and validates WebSearch redirects before fetching them.
 
-Highest priority: block arbitrary outbound URL fetches, apply the same rate/page policy to all HTTP reads, validate redirects and final hosts, and add tests that make these guarantees executable.
+Remaining priorities: add response body/content-type limits, sanitize allowed URL logs and transport errors, apply the shared HTTP boundary to non-WebSearch adapters, and generate dated source-health artifacts.
 
 Evidence boundary: repository-local review only. No live website probing was performed. The installed security guidance has Python web framework references for Flask/FastAPI/Django, but no FastMCP/MCP-specific or Python general backend reference, so findings below use repo evidence plus common Python/httpx/MCP security practice.
 
 ## Findings
 
 ### SEC-1 High: `browse` and `read` allow arbitrary outbound URL fetches
+
+Status (2026-07-03): **Remediated for the public MCP browse/read boundary.** `EdBrowserService` now rejects unknown browse sources, validates read URLs against the catalog-backed `PublicEducationUrlPolicy`, and rejects unknown hosts before adapter dispatch. The policy allows HTTPS only and rejects URL credentials, localhost, and IP literals. DNS pinning is not implemented; the maintained host allowlist is the current trust boundary.
 
 Impact: a model or caller can turn the MCP server into a server-side request primitive against non-education, internal, localhost, metadata, or otherwise unintended hosts.
 
@@ -29,6 +31,8 @@ Recommendation:
 
 ### SEC-2 High: `BrowserPolicy` is not enforced for `browse` and `read`
 
+Status (2026-07-03): **Partially remediated.** `WebSearchAdapter` browse/read and every redirect hop now consume the shared `BrowserPolicy` page/rate budget. `EduMarketApiAdapter` and `OpenDataApiAdapter` still use their own fixed-endpoint HTTP clients and must move behind the same gateway in the operational-hardening phase.
+
 Impact: the documented per-domain request limit can be bypassed through repeated `browse_education_source` or `read_education_resource` calls.
 
 Evidence:
@@ -44,6 +48,8 @@ Recommendation:
 - Return structured `rate_limited` / `policy_violated` errors consistently for all three MCP tools.
 
 ### SEC-3 Medium: redirects and parsed links can escape the intended source boundary
+
+Status (2026-07-03): **Partially remediated.** `WebSearchAdapter` disables automatic redirects and validates every redirect target before the next GET. TWCampus and fixed-endpoint API adapters still use automatic redirects, and parsed browse links are not yet filtered at result construction time.
 
 Impact: a trusted-looking education source or search result can lead the tool to non-education or internal targets through redirects or off-domain links.
 
@@ -106,6 +112,8 @@ Recommendation:
 
 ### DATA-2 Medium: tests do not cover security-negative URL cases
 
+Status (2026-07-03): **Partially remediated.** Deterministic tests now cover non-HTTPS URLs, userinfo, localhost, IP literals, unknown hosts, cross-domain redirects, known redirects, service-level rejection before adapter calls, and generic web rate limiting. Oversized-body and non-text content tests remain pending with SEC-4.
+
 Impact: the riskiest retrieval behaviors can regress silently because current tests assert the permissive path.
 
 Evidence:
@@ -122,12 +130,12 @@ Recommendation:
 
 ### Phase 1: Security Boundary
 
-1. Add `domain/url_policy.py` or equivalent with URL normalization and validation.
-2. Reject unknown direct sources by default in `EdBrowserService.browse_source`.
-3. Restrict `read_resource` to known/validated public education hosts.
-4. Apply `BrowserPolicy` to every outbound `browse` and `read` request.
-5. Validate redirect chains and final URLs.
-6. Add security-negative tests before changing behavior.
+1. Completed: added `domain/url_policy.py` with catalog-backed HTTPS validation.
+2. Completed: rejected unknown direct sources in `EdBrowserService.browse_source`.
+3. Completed: restricted `read_resource` to known/validated education hosts.
+4. Completed for `WebSearchAdapter`: applied `BrowserPolicy` to browse/read and redirect hops.
+5. Completed for `WebSearchAdapter`: disabled automatic redirects and validated each target before fetching.
+6. Completed for the implemented boundary: added security-negative tests before implementation.
 
 ### Phase 2: Data Retrieval Correctness
 

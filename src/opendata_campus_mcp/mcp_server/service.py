@@ -20,11 +20,13 @@ from opendata_campus_mcp.contracts import (
     ExamArchiveAdapter,
     ExamQuestionResult,
     ExamSearchRequest,
+    PolicyViolationError,
     ReadRequest,
     SourceUnavailableError,
 )
 from opendata_campus_mcp.domain.browser_policy import BrowserPolicy
 from opendata_campus_mcp.domain.source_router import SourceRouter
+from opendata_campus_mcp.domain.url_policy import PublicEducationUrlPolicy
 from opendata_campus_mcp.repository.source_cache import get_known_sources
 
 log = logging.getLogger(__name__)
@@ -39,6 +41,7 @@ class EdBrowserService:
         adapters: dict[AccessStrategy, BrowseAdapter],
         fallback: BrowseAdapter,
         exam_adapter: ExamArchiveAdapter | None = None,
+        url_policy: PublicEducationUrlPolicy | None = None,
     ) -> None:
         self._policy = policy
         self._router = router
@@ -46,6 +49,9 @@ class EdBrowserService:
         self._adapters = adapters
         self._fallback = fallback
         self._exam_adapter = exam_adapter
+        self._url_policy = url_policy or PublicEducationUrlPolicy.from_sources(
+            get_known_sources().values()
+        )
 
     # ── discover_education_sources ────────────────────────────────────────────
 
@@ -83,15 +89,7 @@ class EdBrowserService:
             or self._router.find_by_url(request.source_name_or_url)
         )
         if source is None:
-            # 使用者直接傳入 URL 或未知平台名稱 → 建立臨時 source
-            raw = request.source_name_or_url
-            url = raw if raw.startswith("http") else f"https://{raw}"
-            source = EducationSource(
-                name=raw,
-                official_url=url,
-                description="",
-                access_strategy=AccessStrategy.WEB_SEARCH,
-            )
+            raise PolicyViolationError("browse source is not in the source catalog")
 
         adapter = self._adapters.get(source.access_strategy, self._fallback)
         results = await adapter.browse(source, request)
@@ -119,11 +117,11 @@ class EdBrowserService:
     async def read_resource(self, request: ReadRequest) -> dict[str, Any]:
         # 依資源頁 URL host 找來源 → 取對應 adapter（OPEN_DATA dataset 頁走 OpenData
         # adapter 的結構化 read；其餘 / 未知 host 落 fallback 的 HTML 擷取）。
+        self._url_policy.validate(request.url)
         source = self._router.find_by_host(request.url)
-        adapter = (
-            self._adapters.get(source.access_strategy, self._fallback)
-            if source else self._fallback
-        )
+        if source is None:
+            raise PolicyViolationError("read URL host is not in the source catalog")
+        adapter = self._adapters.get(source.access_strategy, self._fallback)
         return await adapter.read(request.url, list(request.extract))
 
     # ── search_exam_questions ─────────────────────────────────────────────────

@@ -158,11 +158,13 @@ async def test_browse_returns_results_with_source_fields(service: EdBrowserServi
 
 
 @pytest.mark.asyncio
-async def test_browse_unknown_source_builds_adhoc(service: EdBrowserService, mock_web: AsyncMock):
-    mock_web.browse.return_value = []
+async def test_browse_unknown_source_is_rejected_before_adapter_call(
+    service: EdBrowserService, mock_web: AsyncMock
+):
     req = BrowseRequest(source_name_or_url="https://unknown.edu.tw", query="教材", max_results=5)
-    result = await service.browse_source(req)
-    assert result["official_url"] == "https://unknown.edu.tw"
+    with pytest.raises(PolicyViolationError):
+        await service.browse_source(req)
+    mock_web.browse.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -219,13 +221,14 @@ async def test_browse_falls_back_when_strategy_unregistered(policy: BrowserPolic
 
 
 @pytest.mark.asyncio
-async def test_browse_adhoc_url_uses_fallback(service: EdBrowserService, mock_web: AsyncMock):
-    """未知 URL 建立的 ad-hoc WEB_SEARCH source → 走 fallback adapter。"""
-    mock_web.browse.return_value = []
-    await service.browse_source(
-        BrowseRequest(source_name_or_url="https://unknown.edu.tw", query="x", max_results=5)
-    )
-    mock_web.browse.assert_called()
+async def test_browse_unknown_name_is_rejected(
+    service: EdBrowserService, mock_web: AsyncMock
+):
+    with pytest.raises(PolicyViolationError):
+        await service.browse_source(
+            BrowseRequest(source_name_or_url="unknown.edu.tw", query="x", max_results=5)
+        )
+    mock_web.browse.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -259,7 +262,7 @@ async def test_read_returns_url_field_matching_input(service: EdBrowserService):
 @pytest.mark.asyncio
 async def test_read_login_required_propagates(service: EdBrowserService, mock_web: AsyncMock):
     mock_web.read.side_effect = LoginRequiredError("login required")
-    req = ReadRequest(url="https://private.edu.tw/resource/1")
+    req = ReadRequest(url="https://market.cloud.edu.tw/resource/1")
     with pytest.raises(LoginRequiredError):
         await service.read_resource(req)
 
@@ -341,17 +344,34 @@ async def test_read_dispatches_by_host(
 
 
 @pytest.mark.asyncio
-async def test_read_unknown_host_uses_fallback(
+async def test_read_unknown_host_is_rejected_before_adapter_call(
     policy: BrowserPolicy,
     router: SourceRouter,
     mock_twcampus: AsyncMock,
     mock_web: AsyncMock,
 ):
-    """未知 host → 落 fallback adapter。"""
-    mock_web.read.return_value = {"url": "https://unknown.example.com/x"}
+    """未知 host 在 service boundary 被拒絕。"""
     svc = EdBrowserService(
         policy, router, mock_twcampus,
         {AccessStrategy.WEB_SEARCH: mock_web}, fallback=mock_web,
     )
-    await svc.read_resource(ReadRequest(url="https://unknown.example.com/x"))
-    mock_web.read.assert_awaited_once()
+    with pytest.raises(PolicyViolationError):
+        await svc.read_resource(ReadRequest(url="https://unknown.example.com/x"))
+    mock_web.read.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://market.cloud.edu.tw/resource/1",
+        "https://user:secret@market.cloud.edu.tw/resource/1",
+        "https://127.0.0.1/resource/1",
+    ],
+)
+async def test_read_unsafe_url_is_rejected_before_adapter_call(
+    service: EdBrowserService, mock_web: AsyncMock, url: str
+):
+    with pytest.raises(PolicyViolationError):
+        await service.read_resource(ReadRequest(url=url))
+    mock_web.read.assert_not_called()

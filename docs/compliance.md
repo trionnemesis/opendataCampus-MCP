@@ -4,7 +4,7 @@
 
 ## 瀏覽政策（合規護欄）
 
-護欄寫死於 [`domain/browser_policy.py`](../src/opendata_campus_mcp/domain/browser_policy.py)，無法由請求參數放寬。
+請求數與頁面數護欄寫死於 [`domain/browser_policy.py`](../src/opendata_campus_mcp/domain/browser_policy.py)；outbound URL 邊界寫死於 [`domain/url_policy.py`](../src/opendata_campus_mcp/domain/url_policy.py)，均無法由請求參數放寬。
 
 | 政策 | 值 |
 |------|----|
@@ -16,6 +16,9 @@
 | 向量索引 | **停用** |
 | 無頭瀏覽器（Playwright） | 預設 **停用**，需明確 `enabled=True`（見 [無頭瀏覽策略](headless.md)） |
 | 登入 / 繞過存取控制 | **永不嘗試** |
+| URL scheme | 僅允許 **HTTPS** |
+| URL host | 僅允許內建來源 host 及其 subdomain；拒絕未知 host、localhost、userinfo 與 IP literal |
+| HTTP redirect | 關閉自動跟隨；每個 `Location` 在下一次 GET 前重新套用 URL 與頁面政策 |
 
 ---
 
@@ -24,6 +27,8 @@
 誠實標註目前邊界，供使用前評估：
 
 - **各來源 live 可用性不一**：無 key smoke 實測 10 個內建來源中 8 個可正常 browse（因材網、教育部數位教學資源入口網、GEPT、國立公共資訊圖書館、大學入學考試中心 CEEC、均一、國教院、政府資料開放平臺），其餘 2 個 FAIL（教育大市集無 key 降級後搜尋頁 404、CIRN 憑證名稱不符）— 詳見 [來源 live 健康度](sources.md#來源-live-健康度)。可用性會隨各站改版與執行環境而變動（如國教院曾於前次快照連線中斷）。
+- **任意 URL 不再是支援介面**：`browse` 只接受內建來源名稱或其 canonical URL；`read` 只接受內建來源 host。未知或不安全 URL 在 network call 前回 `policy_violated`。
+- **回應大小與 content type 尚未設 hard limit**：HTML summary 雖限制 500 字，但目前仍會先下載並 parse 完整 response body；此項保留於後續 hardening issue。
 - **`read` 的 `education_stage` / `subject` 為 best-effort**：教育大市集經官方 API 在 **browse** 已回傳結構化學制 / 領域；但 **read**（及其他 web_search 來源）仍走 [`web_search.py`](../src/opendata_campus_mcp/adapters/web_search.py) 的 HTML 擷取，這兩個欄位對多數來源仍可能為 `null`。`web_search.py` 的 `_extract_fields` 已強化 publisher / license 萃取（case-insensitive meta，DC.* / og:* 順序，空值視為 miss），但實測現有來源 `education_stage` / `subject` 多無可靠 meta，**多數仍為 `null`**（誠實標註，非保證填值）。
 - **政府資料開放平臺（`OPEN_DATA`）為官方匿名 open data API**：browse **不打 API**（純本地 catalog 過濾），read 走官方 by-id API 並回傳附實際下載點的 `resources`；檔案約 **13 KB–506 KB**，遠低於瀏覽政策護欄。8 dataset 屬**統計 / 名錄類開放資料，非教材或題庫**（6 統計 + 2 名錄）— 詳見 [政府資料開放平臺](sources.md#政府資料開放平臺open_data)。
 - **`discover` 的 TWCampus 降級是靜默的**：TWCampus 任何故障（含潛在程式錯誤）都會被吞為 `log.info` 後退回本地目錄，正常路徑與降級路徑對使用者輸出不易區分。

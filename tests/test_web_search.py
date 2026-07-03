@@ -5,9 +5,14 @@
 """
 from __future__ import annotations
 
+import httpx
+import pytest
 from bs4 import BeautifulSoup
 
 from opendata_campus_mcp.adapters.web_search import WebSearchAdapter
+from opendata_campus_mcp.contracts import PolicyViolationError, RateLimitError
+from opendata_campus_mcp.domain.browser_policy import BrowserPolicy
+from opendata_campus_mcp.domain.url_policy import PublicEducationUrlPolicy
 
 _EXTRACT = ["title", "summary", "publisher", "education_stage", "subject", "license"]
 # 繞過 __init__（不建 httpx client）；_extract_fields 不依賴實例屬性
@@ -59,3 +64,79 @@ def test_dc_rights_case_insensitive():
 def test_dc_subject_nonempty():
     r = _extract('<meta name="DC.Subject" content="數學">')
     assert r["subject"] == "數學"
+
+
+@pytest.mark.asyncio
+async def test_read_rejects_cross_domain_redirect_before_second_request():
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        return httpx.Response(302, headers={"Location": "https://unknown.example/private"})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = WebSearchAdapter(
+        policy=BrowserPolicy(),
+        url_policy=PublicEducationUrlPolicy(["market.cloud.edu.tw"]),
+        client=client,
+    )
+    try:
+        with pytest.raises(PolicyViolationError):
+            await adapter.read("https://market.cloud.edu.tw/start", ["title"])
+        assert requested == ["https://market.cloud.edu.tw/start"]
+    finally:
+        await adapter.aclose()
+
+
+@pytest.mark.asyncio
+async def test_read_follows_allowed_redirect():
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.url.path == "/start":
+            return httpx.Response(302, headers={"Location": "/resource/1"})
+        return httpx.Response(200, text="<html><title>Allowed</title></html>")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = WebSearchAdapter(
+        policy=BrowserPolicy(),
+        url_policy=PublicEducationUrlPolicy(["market.cloud.edu.tw"]),
+        client=client,
+    )
+    try:
+        result = await adapter.read("https://market.cloud.edu.tw/start", ["title"])
+        assert result["title"] == "Allowed"
+        assert requested == [
+            "https://market.cloud.edu.tw/start",
+            "https://market.cloud.edu.tw/resource/1",
+        ]
+    finally:
+        await adapter.aclose()
+
+
+@pytest.mark.asyncio
+async def test_read_fourth_same_domain_request_is_rate_limited():
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, text="<html><title>Allowed</title></html>")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = WebSearchAdapter(
+        policy=BrowserPolicy(),
+        url_policy=PublicEducationUrlPolicy(["market.cloud.edu.tw"]),
+        client=client,
+    )
+    try:
+        for index in range(3):
+            await adapter.read(
+                f"https://market.cloud.edu.tw/resource/{index}", ["title"]
+            )
+        with pytest.raises(RateLimitError):
+            await adapter.read("https://market.cloud.edu.tw/resource/4", ["title"])
+        assert calls == 3
+    finally:
+        await adapter.aclose()

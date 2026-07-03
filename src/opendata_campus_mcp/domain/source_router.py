@@ -36,11 +36,17 @@ class SourceRouter:
 
     def find_by_host(self, url: str) -> EducationSource | None:
         """以 URL host 比對來源（供 read 依資源頁 URL 分派 adapter）。"""
-        host = urlparse(url).netloc.lower()
+        host = (urlparse(url).hostname or "").lower().rstrip(".")
         if not host:
             return None
         for s in self._sources.values():
-            if urlparse(s.official_url).netloc.lower() == host:
+            source_host = (
+                (urlparse(s.official_url).hostname or "")
+                .lower()
+                .rstrip(".")
+                .removeprefix("www.")
+            )
+            if host == source_host or host.endswith(f".{source_host}"):
                 return s
         return None
 

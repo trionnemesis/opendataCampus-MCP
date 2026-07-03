@@ -60,6 +60,16 @@ def test_find_by_url_trailing_slash(router: SourceRouter):
     assert s is not None
 
 
+def test_find_by_host_accepts_catalog_domain_subdomain(router: SourceRouter):
+    source = router.find_by_host("https://resources.market.cloud.edu.tw/item/1")
+    assert source is not None
+    assert source.name == "教育大市集"
+
+
+def test_find_by_host_rejects_lookalike_domain(router: SourceRouter):
+    assert router.find_by_host("https://market.cloud.edu.tw.evil.example/item/1") is None
+
+
 def test_score_keyword_match(router: SourceRouter):
     req = DiscoveryRequest(query="教案 國中")
     pairs = router.score_sources(list(_SOURCES.values()), req)

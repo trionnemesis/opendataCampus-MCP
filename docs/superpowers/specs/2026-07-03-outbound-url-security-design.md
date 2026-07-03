@@ -22,7 +22,7 @@ Education-market fallback repair, CIRN endpoint repair, production-parity smoke 
 
 Add `PublicEducationUrlPolicy` under `domain/`. It owns URL normalization and host authorization. Its allowlist is constructed from the canonical hosts in `source_cache`; subdomains are accepted only when they belong to an allowlisted parent domain. The policy has no network or adapter dependencies.
 
-Add a small redirect-aware request helper under `adapters/`. It validates the initial URL, performs one HTTP request with `follow_redirects=False`, resolves each `Location` value, validates it, and follows at most five redirects. Validation occurs before each network request.
+Add a small redirect-aware request helper under `adapters/`. It validates the initial URL, performs one HTTP request with `follow_redirects=False`, resolves each `Location` value, and validates it before the next request. Redirects consume the existing two-page `BrowserPolicy` budget, so no tool call can fetch a third page.
 
 `EdBrowserService` remains the external security boundary. Unknown browse sources and unknown read hosts raise `PolicyViolationError`. `WebSearchAdapter` receives the URL policy and shared `BrowserPolicy`, then applies both before outbound browse/read requests.
 
@@ -39,7 +39,7 @@ Add a small redirect-aware request helper under `adapters/`. It validates the in
 
 - Unsafe URL or unknown source: `PolicyViolationError` and MCP `policy_violated` response.
 - Per-domain rate limit: existing `RateLimitError` and MCP `rate_limited` response.
-- Redirect loop or redirect count above five: `SourceUnavailableError`.
+- Redirect chain requiring a third page: existing `PolicyViolationError`.
 - HTTP transport, login-required, and source-unavailable behavior remains unchanged.
 
 No external error may include URL userinfo, query parameters, or fragments from a rejected URL.

@@ -39,7 +39,7 @@
 
 | 參數 | 型別 | 說明 |
 |------|------|------|
-| `source` | `str` | 平台名稱（如「教育大市集」「政府資料開放平臺」）或官方 URL |
+| `source` | `str` | 內建平台名稱（如「教育大市集」「政府資料開放平臺」）或該平台 canonical URL；未知來源會被拒絕 |
 | `query` | `str` | 搜尋關鍵字 |
 | `max_results` | `int` | 預設 5，上限 5 |
 
@@ -77,7 +77,7 @@
 
 | 參數 | 型別 | 說明 |
 |------|------|------|
-| `url` | `str` | 資源頁面 URL |
+| `url` | `str` | 內建來源 host 下的 HTTPS 資源頁面 URL；未知 host、IP literal、localhost 或含 userinfo 的 URL 會被拒絕 |
 | `extract` | `list[str]?` | 欲擷取欄位，預設全部六項 |
 
 可擷取欄位：`title`、`summary`、`publisher`、`education_stage`、`subject`、`license`。
@@ -176,8 +176,8 @@
 
 | `error` | 觸發時機 | 出現工具 |
 |---------|----------|----------|
-| `rate_limited` | 超過每分鐘請求上限 | discover |
-| `policy_violated` | 超過每次頁面上限 | discover |
+| `rate_limited` | 超過每分鐘請求上限 | discover, browse, read, search_exam |
+| `policy_violated` | 超過每次頁面上限，或 browse/read URL 不符合 known-host HTTPS policy | discover, browse, read, search_exam |
 | `source_unavailable` | 平台無法存取（網路錯誤 / 5xx） | browse, read, search_exam |
 | `login_required` | 資源需登入（401 / 403） | browse, read, search_exam |
 | `unsupported_exam_type` | `exam_type` 非「學測 / 分科測驗」（會考因 robots.txt Disallow 不納入） | search_exam |

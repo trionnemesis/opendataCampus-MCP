@@ -45,7 +45,7 @@
 - [ ] Add a redirect-to-unknown-host test that asserts no second request occurs.
 - [ ] Add same-host redirect and fourth-request rate-limit tests.
 - [ ] Run focused tests and confirm expected failures.
-- [ ] Implement manual redirect handling with `follow_redirects=False`, five-hop maximum, URL validation before every GET, and per-request BrowserPolicy checks.
+- [ ] Implement manual redirect handling with `follow_redirects=False`, URL validation before every GET, and the existing two-page BrowserPolicy budget.
 - [ ] Run focused tests and confirm they pass.
 
 ### Task 4: Documentation and full verification

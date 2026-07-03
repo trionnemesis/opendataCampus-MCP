@@ -34,6 +34,7 @@ from opendata_campus_mcp.contracts import (
 )
 from opendata_campus_mcp.domain.browser_policy import BrowserPolicy
 from opendata_campus_mcp.domain.source_router import SourceRouter
+from opendata_campus_mcp.domain.url_policy import PublicEducationUrlPolicy
 from opendata_campus_mcp.mcp_server.service import EdBrowserService
 from opendata_campus_mcp.repository.source_cache import get_known_sources
 
@@ -59,9 +60,11 @@ _SUPPORTED_EXAM_TYPES = ("學測", "分科測驗")
 
 def build_server() -> FastMCP:
     policy = BrowserPolicy()
-    router = SourceRouter(get_known_sources())
+    known_sources = get_known_sources()
+    router = SourceRouter(known_sources)
+    url_policy = PublicEducationUrlPolicy.from_sources(known_sources.values())
     twcampus = TwCampusDirectoryAdapter(policy)
-    web = WebSearchAdapter()
+    web = WebSearchAdapter(policy=policy, url_policy=url_policy)
     adapters: dict[AccessStrategy, BrowseAdapter] = {
         AccessStrategy.WEB_SEARCH: web,
         AccessStrategy.OPEN_DATA: OpenDataApiAdapter(),  # data.gov.tw,無 key,無條件註冊
@@ -74,7 +77,8 @@ def build_server() -> FastMCP:
         )
     exam = CeecExamAdapter(policy)  # 與 twcampus 共用同一 policy（per-domain 計數互不干擾）
     service = EdBrowserService(
-        policy, router, twcampus, adapters, fallback=web, exam_adapter=exam
+        policy, router, twcampus, adapters, fallback=web, exam_adapter=exam,
+        url_policy=url_policy,
     )
 
     mcp = FastMCP("opendata-campus-mcp", instructions=_INSTRUCTIONS)
@@ -141,6 +145,10 @@ def build_server() -> FastMCP:
             }
         except LoginRequiredError as exc:
             return {"error": "login_required", "message": str(exc)}
+        except PolicyViolationError as exc:
+            return {"error": "policy_violated", "message": str(exc)}
+        except RateLimitError as exc:
+            return {"error": "rate_limited", "message": str(exc)}
 
     # ── Tool 3：read_education_resource ───────────────────────────────────────
 
@@ -166,6 +174,10 @@ def build_server() -> FastMCP:
             return {"error": "login_required", "url": url, "message": str(exc)}
         except SourceUnavailableError as exc:
             return {"error": "source_unavailable", "url": url, "message": str(exc)}
+        except PolicyViolationError as exc:
+            return {"error": "policy_violated", "message": str(exc)}
+        except RateLimitError as exc:
+            return {"error": "rate_limited", "message": str(exc)}
 
     # ── Tool 4：search_exam_questions ─────────────────────────────────────────
 
