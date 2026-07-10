@@ -35,12 +35,12 @@
 | 均一教育平台 | ✅ OK | browse 回傳 5 筆 |
 | 國教院課程資源網 | ✅ OK | browse 回傳 5 筆（前次快照曾連線中斷，live 狀態不穩） |
 | 政府資料開放平臺 | ✅ OK | `OPEN_DATA` browse 回傳 3 筆（本地 catalog，不打 API） |
-| 教育大市集 | ❌ 無 key 降級 | 未設 `EDUMARKET_API_KEY` 時走 web_search 降級，該搜尋頁回 HTTP 404 |
+| 教育大市集 | ❌ 未設定 key | 走 OFFICIAL_API adapter，於 HTTP request 前回 `EDUMARKET_API_KEY not configured` |
 | CIRN | ⚠️ EMPTY | canonical host 連線成功，但通用 parser 對本次查詢未解析出結果 |
 
 > OK=8 / EMPTY=1 / FAIL=1（10 來源）。
 
-- **教育大市集**：上表為無 key 快照故降級；**設 `EDUMARKET_API_KEY` 後 browse 走官方 v2 API 即正常**（見 [安裝與設定](setup.md#教育大市集官方-api-key選用)）。
+- **教育大市集**：未設定 key 時明確回 `source_unavailable`，不再降級為已知 404 的 web search；**設 `EDUMARKET_API_KEY` 後 browse 走官方 v2 API**（見 [安裝與設定](setup.md#教育大市集官方-api-key選用)）。
 - 此表為單一環境、無 key 情境的快照，僅供參考；請以你自己環境執行 `smoke_sources.py` 的結果為準。
 
 ---

@@ -26,7 +26,7 @@
 
 誠實標註目前邊界，供使用前評估：
 
-- **各來源 live 可用性不一**：無 key smoke 實測 10 個內建來源中 8 個可正常 browse（因材網、教育部數位教學資源入口網、GEPT、國立公共資訊圖書館、大學入學考試中心 CEEC、均一、國教院、政府資料開放平臺），其餘 2 個 FAIL（教育大市集無 key 降級後搜尋頁 404、CIRN 憑證名稱不符）— 詳見 [來源 live 健康度](sources.md#來源-live-健康度)。可用性會隨各站改版與執行環境而變動（如國教院曾於前次快照連線中斷）。
+- **各來源 live 可用性不一**：無 key smoke 實測 10 個內建來源中 8 個可正常 browse（因材網、教育部數位教學資源入口網、GEPT、國立公共資訊圖書館、大學入學考試中心 CEEC、均一、國教院、政府資料開放平臺）；CIRN 連線成功但本次查詢為 `EMPTY`，教育大市集則因未設定 key 預期回 `source_unavailable` 且不發送 HTTP request—詳見 [來源 live 健康度](sources.md#來源-live-健康度)。可用性會隨各站改版與執行環境而變動（如國教院曾於前次快照連線中斷）。
 - **任意 URL 不再是支援介面**：`browse` 只接受內建來源名稱或其 canonical URL；`read` 只接受內建來源 host。未知或不安全 URL 在 network call 前回 `policy_violated`。
 - **回應大小與 content type 尚未設 hard limit**：HTML summary 雖限制 500 字，但目前仍會先下載並 parse 完整 response body；此項保留於後續 hardening issue。
 - **`read` 的 `education_stage` / `subject` 為 best-effort**：教育大市集經官方 API 在 **browse** 已回傳結構化學制 / 領域；但 **read**（及其他 web_search 來源）仍走 [`web_search.py`](../src/opendata_campus_mcp/adapters/web_search.py) 的 HTML 擷取，這兩個欄位對多數來源仍可能為 `null`。`web_search.py` 的 `_extract_fields` 已強化 publisher / license 萃取（case-insensitive meta，DC.* / og:* 順序，空值視為 miss），但實測現有來源 `education_stage` / `subject` 多無可靠 meta，**多數仍為 `null`**（誠實標註，非保證填值）。

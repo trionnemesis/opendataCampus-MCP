@@ -22,17 +22,12 @@ import sys
 
 sys.path.insert(0, "src")
 
-from opendata_campus_mcp.adapters.opendata import OpenDataApiAdapter
-from opendata_campus_mcp.adapters.twcampus import TwCampusDirectoryAdapter
-from opendata_campus_mcp.adapters.web_search import WebSearchAdapter
 from opendata_campus_mcp.contracts import (
-    AccessStrategy,
     BrowseRequest,
     LoginRequiredError,
     SourceUnavailableError,
 )
-from opendata_campus_mcp.domain.browser_policy import BrowserPolicy
-from opendata_campus_mcp.domain.source_router import SourceRouter
+from opendata_campus_mcp.mcp_server.runtime import build_runtime
 from opendata_campus_mcp.mcp_server.service import EdBrowserService
 from opendata_campus_mcp.repository.source_cache import get_known_sources
 
@@ -74,34 +69,25 @@ async def _probe(svc: EdBrowserService, name: str, query: str) -> tuple[str, str
 
 
 async def main() -> int:
-    policy = BrowserPolicy()
-    router = SourceRouter(get_known_sources())
-    twcampus = TwCampusDirectoryAdapter(policy)
-    web = WebSearchAdapter()
-    opendata = OpenDataApiAdapter()
-    svc = EdBrowserService(
-        policy, router, twcampus,
-        {AccessStrategy.WEB_SEARCH: web, AccessStrategy.OPEN_DATA: opendata},
-        fallback=web,
-    )
+    runtime = build_runtime()
+    svc = runtime.service
 
     sources = get_known_sources()
     print(f"Live smoke test — {len(sources)} 個內建教育來源")
     print(_LINE)
 
     rows: list[tuple[str, str]] = []
-    for name in sources:
-        query = SMOKE_QUERIES.get(name, _DEFAULT_QUERY)
-        status, detail = await _probe(svc, name, query)
-        icon = _ICON.get(status, "💥")
-        print(f"{icon} {status:<11} {name}  (q='{query}')")
-        print(f"     {detail}")
-        rows.append((status, name))
-        await asyncio.sleep(0.5)  # 對各站禮貌延遲
-
-    await twcampus.aclose()
-    await web.aclose()
-    await opendata.aclose()
+    try:
+        for name in sources:
+            query = SMOKE_QUERIES.get(name, _DEFAULT_QUERY)
+            status, detail = await _probe(svc, name, query)
+            icon = _ICON.get(status, "💥")
+            print(f"{icon} {status:<11} {name}  (q='{query}')")
+            print(f"     {detail}")
+            rows.append((status, name))
+            await asyncio.sleep(0.5)  # 對各站禮貌延遲
+    finally:
+        await runtime.aclose()
 
     ok = sum(1 for s, _ in rows if s == "OK")
     empty = sum(1 for s, _ in rows if s == "EMPTY")

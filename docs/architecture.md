@@ -31,7 +31,7 @@
    台灣官方教育平台 + 政府資料開放平臺（data.gov.tw）
 ```
 
-各層僅依賴 `contracts.py` 的型別，符合依賴反轉；`service.py` 以建構子注入 policy / router / adapter，並依 `source.access_strategy` 從 adapter registry 分派（找不到對應策略則落回 fallback web_search），方便測試以 mock 替換。`ceec_exam` 是不經 `access_strategy` 路由的獨立垂直 adapter，由 `search_exam_questions` 直接呼叫，與 `twcampus` 共用同一 `BrowserPolicy`（per-domain 計數互不干擾）。
+各層僅依賴 `contracts.py` 的型別，符合依賴反轉；`service.py` 以建構子注入 policy / router / adapter，並依 `source.access_strategy` 從 adapter registry 分派（找不到對應策略則落回 fallback web_search），方便測試以 mock 替換。`mcp_server/runtime.py` 集中組裝同一份 registry，供 FastMCP、live smoke 與教育大市集 E2E 使用；FastMCP lifespan 結束時統一關閉 runtime 擁有的 HTTP client。`ceec_exam` 是不經 `access_strategy` 路由的獨立垂直 adapter，由 `search_exam_questions` 直接呼叫，與 `twcampus` 共用同一 `BrowserPolicy`（per-domain 計數互不干擾）。
 
 ---
 
@@ -102,8 +102,9 @@ opendataCampus-MCP/
 │   │   └── opendata_catalog.py     # 8 個已驗證教育 open data dataset 目錄
 │   └── mcp_server/
 │       ├── __main__.py             # python -m 進入點
+│       ├── runtime.py               # 共用 adapter registry 與 HTTP client cleanup
 │       ├── service.py              # EdBrowserService（依 access_strategy 分派 adapter）
-│       └── server.py               # FastMCP 工具定義（key-gated 組裝 adapter）
+│       └── server.py               # FastMCP 工具定義（委派 runtime 組裝）
 ├── tests/
 │   ├── test_browser_policy.py
 │   ├── test_source_router.py

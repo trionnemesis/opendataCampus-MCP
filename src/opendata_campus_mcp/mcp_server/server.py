@@ -9,18 +9,13 @@
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from opendata_campus_mcp.adapters.ceec_exam import CeecExamAdapter
-from opendata_campus_mcp.adapters.edumarket import EduMarketApiAdapter
-from opendata_campus_mcp.adapters.opendata import OpenDataApiAdapter
-from opendata_campus_mcp.adapters.twcampus import TwCampusDirectoryAdapter
-from opendata_campus_mcp.adapters.web_search import WebSearchAdapter
 from opendata_campus_mcp.contracts import (
-    AccessStrategy,
-    BrowseAdapter,
     BrowseRequest,
     DiscoveryRequest,
     ExamSearchRequest,
@@ -30,11 +25,7 @@ from opendata_campus_mcp.contracts import (
     ReadRequest,
     SourceUnavailableError,
 )
-from opendata_campus_mcp.domain.browser_policy import BrowserPolicy
-from opendata_campus_mcp.domain.source_router import SourceRouter
-from opendata_campus_mcp.domain.url_policy import PublicEducationUrlPolicy
-from opendata_campus_mcp.mcp_server.service import EdBrowserService
-from opendata_campus_mcp.repository.source_cache import get_known_sources
+from opendata_campus_mcp.mcp_server.runtime import build_runtime
 
 _INSTRUCTIONS = """\
 教育資源導航 MCP — 以 TWCampus 作為目錄入口，路由至台灣官方教育平台搜尋。
@@ -57,25 +48,21 @@ _SUPPORTED_EXAM_TYPES = ("學測", "分科測驗")
 
 
 def build_server() -> FastMCP:
-    policy = BrowserPolicy()
-    known_sources = get_known_sources()
-    router = SourceRouter(known_sources)
-    url_policy = PublicEducationUrlPolicy.from_sources(known_sources.values())
-    twcampus = TwCampusDirectoryAdapter(policy)
-    web = WebSearchAdapter(policy=policy, url_policy=url_policy)
-    adapters: dict[AccessStrategy, BrowseAdapter] = {
-        AccessStrategy.WEB_SEARCH: web,
-        AccessStrategy.OPEN_DATA: OpenDataApiAdapter(),  # data.gov.tw,無 key,無條件註冊
-        # EduMarket adapter 在無 key 時回傳明確 unavailable，避免已知 404 fallback。
-        AccessStrategy.OFFICIAL_API: EduMarketApiAdapter(html_reader=web),
-    }
-    exam = CeecExamAdapter(policy)  # 與 twcampus 共用同一 policy（per-domain 計數互不干擾）
-    service = EdBrowserService(
-        policy, router, twcampus, adapters, fallback=web, exam_adapter=exam,
-        url_policy=url_policy,
-    )
+    runtime = build_runtime()
+    service = runtime.service
 
-    mcp = FastMCP("opendata-campus-mcp", instructions=_INSTRUCTIONS)
+    @asynccontextmanager
+    async def runtime_lifespan(_server: FastMCP):
+        try:
+            yield {}
+        finally:
+            await runtime.aclose()
+
+    mcp = FastMCP(
+        "opendata-campus-mcp",
+        instructions=_INSTRUCTIONS,
+        lifespan=runtime_lifespan,
+    )
 
     @mcp.custom_route("/healthz", methods=["GET"])
     async def healthz(_request: Request) -> JSONResponse:

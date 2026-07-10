@@ -1,5 +1,5 @@
 # TASK-STATE — Source reliability corrections
-更新: 2026-07-11T00:00:00+08:00 / 進度: 4/7 milestones
+更新: 2026-07-11T00:00:00+08:00 / 進度: 7/7 milestones
 
 ## Goal
 使用者要求：依既有討論執行修正，先完成並 commit spec，再確認實作範圍，實作、驗證、commit、push。
@@ -17,16 +17,17 @@
 - 4. Committed the spec-only change. Evidence: `git show --stat --oneline d62407f` → 5 files, 276 insertions.
 - 5. Completed EduMarket no-key RED→GREEN. Evidence: targeted pytest command → 13 passed; the server now routes market to OFFICIAL_API and returns structured unavailable without web fallback.
 - 6. Completed CIRN canonical-host RED→GREEN. Evidence: source-router/web-search tests → 20 passed; live smoke changed CIRN from TLS failure to `EMPTY` while the old smoke registry still reports EduMarket HTTP 404.
+- 7. Completed shared runtime RED→GREEN. Evidence: runtime/server tests → 6 passed; full suite → 108 passed; no-key smoke uses OFFICIAL_API and returns `EDUMARKET_API_KEY not configured` before HTTP.
 
 ## Active State
 - cwd: `/Users/warden/opendateCampus_MCP`
 - branch: `feat/edumarket-official-api`
-- current implementation changes: Phase 2 CIRN fix and source-health documentation; awaiting isolated commit
-- last full validation: `.venv/bin/pytest tests/ -q` → 103 passed (before this task)
+- current implementation changes: Phase 3 shared runtime, test coverage, and source-health/architecture documentation; review passed, awaiting isolated commit and push
+- last full validation: `.venv/bin/pytest tests/ -q` → 108 passed (before review follow-up test hardening)
 - running processes: none
 
 ## Next Step
-Run `git diff --check`, commit Phase 2, then write runtime-factory composition tests RED.
+Run final verification, commit Phase 3, then push all three implementation commits.
 
 ## Blocked
 - Configured-key live E2E remains blocked until the user provides `EDUMARKET_API_KEY` through the runtime environment. It does not block no-key behavior or mocked validation.
@@ -36,9 +37,9 @@ Run `git diff --check`, commit Phase 2, then write runtime-factory composition t
 - Select a shared runtime factory over duplicate script assembly because three current entry points assemble adapters independently.
 
 ## Relevant Files
-- `src/opendata_campus_mcp/mcp_server/server.py:build_server` — production adapter registry has key-gated EduMarket registration.
-- `scripts/smoke_sources.py:main` — duplicates a different adapter registry.
-- `scripts/integration_e2e.py:main` — duplicates keyed runtime assembly.
+- `src/opendata_campus_mcp/mcp_server/runtime.py:build_runtime` — production adapter registry and owned HTTP-client cleanup.
+- `src/opendata_campus_mcp/mcp_server/server.py:build_server` — FastMCP tools use the shared runtime and close it in lifespan shutdown.
+- `scripts/smoke_sources.py:main` / `scripts/integration_e2e.py:main` — consume the shared runtime factory.
 - `src/opendata_campus_mcp/repository/source_cache.py:_CATALOG` — CIRN canonical URL.
 - `src/opendata_campus_mcp/adapters/web_search.py:SEARCH_TEMPLATES` — CIRN search URL.
 
