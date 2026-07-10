@@ -5,8 +5,8 @@
   → JSON 信封 {status, msg, page, totalpage, resources:[...]}
   → 每筆 Resources 含 edugrade(學制)/domain(領域)/copyright(授權) 等結構化欄位
 
-key 由環境變數 EDUMARKET_API_KEY 注入；無 key 時 build_server 不註冊本 adapter,
-教育大市集的請求自然降級回 WebSearchAdapter（見 mcp_server/server.py）。
+key 由環境變數 EDUMARKET_API_KEY 注入；無 key 時 browse 回傳明確 unavailable，
+不降級至已知會失敗的 WebSearchAdapter 路徑。
 read 無 by-id 詳情端點,委派給注入的 html_reader（通常為 WebSearchAdapter）。
 """
 from __future__ import annotations
@@ -63,7 +63,7 @@ class EduMarketApiAdapter:
         self, source: EducationSource, request: BrowseRequest
     ) -> list[SearchResult]:
         if not self._api_key:
-            # safety net：正常情況下無 key 時本 adapter 不會被註冊（見 server.py）
+            # 無 key 是可預期設定狀態；必須在建立 HTTP request 前停止。
             raise SourceUnavailableError(
                 source.name, source.official_url, "EDUMARKET_API_KEY not configured"
             )

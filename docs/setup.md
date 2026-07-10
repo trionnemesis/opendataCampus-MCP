@@ -79,7 +79,7 @@ python -m opendata_campus_mcp.mcp_server
 
 ## 教育大市集官方 API Key（選用）
 
-教育大市集為 `OFFICIAL_API` 來源。提供 `EDUMARKET_API_KEY` 後，browse 會改走官方 v2 REST API 並回傳結構化的學制 / 領域欄位；**無 key 時教育大市集自動降級回 web_search，其餘來源不受影響**。
+教育大市集為 `OFFICIAL_API` 來源。提供 `EDUMARKET_API_KEY` 後，browse 會走官方 v2 REST API 並回傳結構化的學制 / 領域欄位；**無 key 時回傳 `source_unavailable`，不發送已知會失敗的 web_search fallback 請求；其餘來源不受影響**。
 
 申請步驟：登入 [market.cloud.edu.tw](https://market.cloud.edu.tw) → 會員中心 → 資料設定 → API應用服務 → 取得個人 API KEY，再以環境變數 `EDUMARKET_API_KEY` 傳入 server。
 

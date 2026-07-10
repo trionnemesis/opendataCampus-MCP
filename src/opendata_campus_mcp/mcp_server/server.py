@@ -9,8 +9,6 @@
 """
 from __future__ import annotations
 
-import os
-
 from fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -68,13 +66,9 @@ def build_server() -> FastMCP:
     adapters: dict[AccessStrategy, BrowseAdapter] = {
         AccessStrategy.WEB_SEARCH: web,
         AccessStrategy.OPEN_DATA: OpenDataApiAdapter(),  # data.gov.tw,無 key,無條件註冊
+        # EduMarket adapter 在無 key 時回傳明確 unavailable，避免已知 404 fallback。
+        AccessStrategy.OFFICIAL_API: EduMarketApiAdapter(html_reader=web),
     }
-    # 有 EDUMARKET_API_KEY 才註冊教育大市集官方 API；否則該來源自然降級回 web_search
-    api_key = os.environ.get("EDUMARKET_API_KEY")
-    if api_key:
-        adapters[AccessStrategy.OFFICIAL_API] = EduMarketApiAdapter(
-            api_key, html_reader=web
-        )
     exam = CeecExamAdapter(policy)  # 與 twcampus 共用同一 policy（per-domain 計數互不干擾）
     service = EdBrowserService(
         policy, router, twcampus, adapters, fallback=web, exam_adapter=exam,

@@ -232,21 +232,31 @@ async def test_browse_unknown_name_is_rejected(
 
 
 @pytest.mark.asyncio
-async def test_no_key_routes_market_to_web_search(
+async def test_no_key_routes_market_to_official_adapter_without_fallback(
     policy: BrowserPolicy,
     router: SourceRouter,
     mock_twcampus: AsyncMock,
     mock_web: AsyncMock,
 ):
-    """無 key 組裝（registry 無 OFFICIAL_API）→ 教育大市集（OFFICIAL_API source）落回 web_search。"""
+    """無 key 時仍走 OFFICIAL_API；adapter 自行回傳 unavailable。"""
+    mock_api = AsyncMock()
+    mock_api.browse.side_effect = SourceUnavailableError(
+        "教育大市集", "https://market.cloud.edu.tw", "EDUMARKET_API_KEY not configured"
+    )
     svc = EdBrowserService(
         policy, router, mock_twcampus,
-        {AccessStrategy.WEB_SEARCH: mock_web}, fallback=mock_web,
+        {
+            AccessStrategy.WEB_SEARCH: mock_web,
+            AccessStrategy.OFFICIAL_API: mock_api,
+        },
+        fallback=mock_web,
     )
-    await svc.browse_source(
-        BrowseRequest(source_name_or_url="教育大市集", query="數學", max_results=5)
-    )
-    mock_web.browse.assert_called_once()
+    with pytest.raises(SourceUnavailableError, match="EDUMARKET_API_KEY not configured"):
+        await svc.browse_source(
+            BrowseRequest(source_name_or_url="教育大市集", query="數學", max_results=5)
+        )
+    mock_api.browse.assert_awaited_once()
+    mock_web.browse.assert_not_called()
 
 
 # ── read_education_resource ───────────────────────────────────────────────────
