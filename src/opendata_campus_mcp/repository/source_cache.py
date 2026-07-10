@@ -28,7 +28,7 @@ _CATALOG: list[EducationSource] = [
     ),
     EducationSource(
         name="CIRN",
-        official_url="https://cirn.moe.edu.tw",
+        official_url="https://cirn.k12ea.gov.tw",
         description="課程研究發展院資源入口，提供國中小課程綱要與教學資源",
         categories=("課程綱要", "教學資源", "教案", "評量工具"),
         education_stages=("國小", "國中"),

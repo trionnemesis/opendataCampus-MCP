@@ -4,7 +4,9 @@ from __future__ import annotations
 import pytest
 
 from opendata_campus_mcp.contracts import AccessStrategy, DiscoveryRequest, EducationSource
+from opendata_campus_mcp.adapters.web_search import SEARCH_TEMPLATES
 from opendata_campus_mcp.domain.source_router import SourceRouter
+from opendata_campus_mcp.repository.source_cache import get_known_sources
 
 _SOURCES: dict[str, EducationSource] = {
     "教育大市集": EducationSource(
@@ -68,6 +70,13 @@ def test_find_by_host_accepts_catalog_domain_subdomain(router: SourceRouter):
 
 def test_find_by_host_rejects_lookalike_domain(router: SourceRouter):
     assert router.find_by_host("https://market.cloud.edu.tw.evil.example/item/1") is None
+
+
+def test_cirn_catalog_and_search_template_share_canonical_host():
+    cirn = get_known_sources()["CIRN"]
+
+    assert cirn.official_url == "https://cirn.k12ea.gov.tw"
+    assert SEARCH_TEMPLATES["CIRN"].startswith(f"{cirn.official_url}/")
 
 
 def test_score_keyword_match(router: SourceRouter):

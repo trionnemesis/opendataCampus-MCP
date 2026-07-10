@@ -40,7 +40,7 @@ _MAX_SUMMARY_CHARS = 500
 SEARCH_TEMPLATES: dict[str, str] = {
     "教育大市集": "https://market.cloud.edu.tw/index.php?inter=search&keyword={query}",
     "因材網": "https://adl.edu.tw/?s={query}",
-    "CIRN": "https://cirn.moe.edu.tw/Module/Basic/bsSearch.aspx?search={query}",
+    "CIRN": "https://cirn.k12ea.gov.tw/Module/Basic/bsSearch.aspx?search={query}",
     "教育部數位教學資源入口網": "https://cloud.edu.tw/?q={query}",
     "國教院課程資源網": "https://www.naer.edu.tw/PageSearch?q={query}",
 }
