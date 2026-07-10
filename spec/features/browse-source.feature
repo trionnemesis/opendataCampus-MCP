@@ -38,6 +38,12 @@ Feature: 官方教育平台搜尋
     Then 應回傳 {"error": "source_unavailable", "source": ..., "url": ...}
     And 不拋出未捕捉例外
 
+  Scenario: 教育大市集未設定官方 API key 時明確回傳不可用
+    Given source="教育大市集" 且未設定 EDUMARKET_API_KEY
+    When 呼叫 browse_education_source
+    Then 應回傳 {"error": "source_unavailable", ...}
+    And 不應改用 web_search 或發送 HTTP 請求
+
   Scenario: 需要登入的頁面拒絕存取
     Given 平台回傳 401/403
     When 呼叫 browse_education_source

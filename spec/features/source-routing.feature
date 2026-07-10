@@ -14,6 +14,12 @@ Feature: 資源存取策略路由
     When 查詢資源
     Then 使用 OFFICIAL_API 策略，不啟動 Playwright 或 HTTP 爬取
 
+  Scenario: OFFICIAL_API 未設定 key 時不降級為猜測式 web search
+    Given 目標平台 access_strategy=OFFICIAL_API 且 adapter 缺少必要 key
+    When 查詢資源
+    Then 回傳 source_unavailable
+    And 不使用 fallback WEB_SEARCH adapter
+
   Scenario: TWCampus 目錄僅作平台路由入口
     Given 需要發現新的教育平台
     When 呼叫 discover_education_sources
