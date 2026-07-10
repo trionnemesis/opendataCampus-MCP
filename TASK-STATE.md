@@ -17,17 +17,17 @@
 - 4. Committed the spec-only change. Evidence: `git show --stat --oneline d62407f` → 5 files, 276 insertions.
 - 5. Completed EduMarket no-key RED→GREEN. Evidence: targeted pytest command → 13 passed; the server now routes market to OFFICIAL_API and returns structured unavailable without web fallback.
 - 6. Completed CIRN canonical-host RED→GREEN. Evidence: source-router/web-search tests → 20 passed; live smoke changed CIRN from TLS failure to `EMPTY` while the old smoke registry still reports EduMarket HTTP 404.
-- 7. Completed shared runtime RED→GREEN. Evidence: runtime/server tests → 6 passed; full suite → 108 passed; no-key smoke uses OFFICIAL_API and returns `EDUMARKET_API_KEY not configured` before HTTP.
+- 7. Completed shared runtime RED→GREEN. Evidence: runtime/server tests → 7 passed; full suite → 109 passed; no-key smoke uses OFFICIAL_API and returns `EDUMARKET_API_KEY not configured` before HTTP.
 
 ## Active State
 - cwd: `/Users/warden/opendateCampus_MCP`
 - branch: `feat/edumarket-official-api`
-- current implementation changes: Phase 3 shared runtime, test coverage, and source-health/architecture documentation; review passed, awaiting isolated commit and push
-- last full validation: `.venv/bin/pytest tests/ -q` → 108 passed (before review follow-up test hardening)
+- current implementation changes: Phase 3 shared runtime, test coverage, and source-health/architecture documentation; review passed and all implementation commits are pushed (`4c26e53`).
+- last full validation: `.venv/bin/pytest tests/ -q` → 109 passed; compileall and diff check clean.
 - running processes: none
 
 ## Next Step
-Run final verification, commit Phase 3, then push all three implementation commits.
+No further implementation step remains; configured-key live E2E remains intentionally blocked pending user-provided runtime credentials.
 
 ## Blocked
 - Configured-key live E2E remains blocked until the user provides `EDUMARKET_API_KEY` through the runtime environment. It does not block no-key behavior or mocked validation.
