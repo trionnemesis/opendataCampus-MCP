@@ -30,6 +30,9 @@
 
 - **三段式導航**：`discover`（找平台）→ `browse`（搜資源）→ `read`（讀摘要），對應 LLM 真實的查找心智流程。
 - **本地目錄優先**：內建 10 個已驗證的台灣官方教育平台，先查本地、不足才補 TWCampus，最小化對 TWCampus 的請求。
+- **教育大市集官方 API**：`教育大市集` 使用 `OFFICIAL_API`；未設定 `EDUMARKET_API_KEY` 時在 HTTP request 前回傳 `source_unavailable`，不降級到已知失效的 web search；設定 key 後回傳官方 API 的結構化學制與領域欄位（見[設定說明](docs/setup.md#教育大市集官方-api-key選用)）。
+- **CIRN canonical host**：CIRN 使用已驗證的 `https://cirn.k12ea.gov.tw`，來源目錄與搜尋 URL 保持一致；各來源的最新 smoke 狀態見[來源健康度](docs/sources.md#來源-live-健康度)。
+- **共用 runtime assembly**：MCP server、live smoke 與教育大市集 E2E 共用同一份 adapter registry，並在 server lifespan 結束時關閉由 runtime 擁有的 HTTP clients。
 - **合規護欄寫死於 domain 層**：每域 3 req/min、每次請求最多 2 頁、不排程、不遞迴、不存全文、不繞過存取控制。
 - **乾淨分層 + DI 邊界**：`contracts.py` 定義所有跨層 DTO / Protocol，新增平台或存取策略不需動到核心邏輯。
 - **降級不中斷**：TWCampus 故障時靜默降級回本地目錄，工具永遠回傳結構化結果或明確的 `error` 物件。
