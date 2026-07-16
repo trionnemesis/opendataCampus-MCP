@@ -2,6 +2,8 @@
 
 **教育資源導航 MCP** — 以 [TWCampus](https://twcampus.org/) 作為目錄入口，路由至台灣官方教育平台，即時搜尋並讀取公開學習資源。
 
+An MCP server that lets LLMs navigate Taiwan's official education platforms without guessing URLs or scraping entire sites. It routes queries through a compliant, auditable layer — discover the right platform, browse it for resources, then read a single summary — with rate limits and access-control guardrails enforced at the domain level.
+
 [![CI](https://github.com/trionnemesis/opendataCampus-MCP/actions/workflows/ci.yml/badge.svg)](https://github.com/trionnemesis/opendataCampus-MCP/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![MCP](https://img.shields.io/badge/MCP-FastMCP%203.x-7c3aed)
@@ -27,6 +29,15 @@
 ---
 
 ## 特色
+
+```mermaid
+flowchart LR
+    A[Claude / Agent] --> D[discover 找平台]
+    D --> B[browse 搜資源]
+    B --> R[read 讀摘要]
+    D -.-> L[(本地目錄)]
+    B --> G[合規護欄]
+```
 
 - **三段式導航**：`discover`（找平台）→ `browse`（搜資源）→ `read`（讀摘要），對應 LLM 真實的查找心智流程。
 - **本地目錄優先**：內建 10 個已驗證的台灣官方教育平台，先查本地、不足才補 TWCampus，最小化對 TWCampus 的請求。
@@ -87,6 +98,13 @@ claude mcp add opendata-campus -- /絕對路徑/opendataCampus-MCP/.venv/bin/ope
 | 登入 / 繞過存取控制 | **永不嘗試** |
 
 本工具僅存取**公開**教育資源並遵守來源服務條款；TWCampus 僅作路由目錄，所有抓取均由使用者即時查詢觸發。完整聲明與已知限制見 [合規與限制](docs/compliance.md)。
+
+---
+
+## Related projects
+
+- [g0VMCP](https://github.com/trionnemesis/g0VMCP) — 政府採購標案情報 MCP
+- [healthcare-opendata-mcp](https://github.com/trionnemesis/healthcare-opendata-mcp) — 醫療健保開放資料 MCP
 
 ---
 
