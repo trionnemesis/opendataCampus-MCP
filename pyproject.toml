@@ -12,7 +12,11 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
 ]
 dependencies = [
-    "fastmcp>=0.2.0",
+    # >=3.2.4：排除已知 CVE 版本範圍（<3.2.0 之 CVE-2026-32871 Critical SSRF/路徑穿越、
+    # CVE-2026-27124 High OAuth Proxy confused deputy、CVE-2025-64340 command injection；
+    # <3.2.4 之 Authorization header 跨 server 外洩）。本專案未使用 OpenAPI provider /
+    # OAuth proxy，但下限過寬（原 >=0.2.0）仍可能解析到已知弱點版本，故收緊下限。
+    "fastmcp>=3.2.4",
     "httpx>=0.27",
     "beautifulsoup4>=4.12",
     # 台灣政府教育平台憑證部分缺 Subject Key Identifier，改用 OS 系統信任庫驗證
