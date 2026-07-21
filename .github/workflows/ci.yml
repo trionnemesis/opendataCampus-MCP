@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# 最小權限原則（CWE-284 / OWASP CICD-SEC-3）：workflow 只需 checkout 原始碼即可跑測試，
+# 明確宣告 read-only，避免依賴 repo 預設 GITHUB_TOKEN 權限（可能較寬）。
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
