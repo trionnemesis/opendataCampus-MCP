@@ -20,6 +20,7 @@ from urllib.parse import quote
 import httpx
 
 from opendata_campus_mcp.adapters._http import build_ssl_context
+from opendata_campus_mcp.adapters.safe_http import safe_get_fixed_host
 from opendata_campus_mcp.contracts import (
     AccessStrategy,
     BrowseAdapter,
@@ -29,10 +30,12 @@ from opendata_campus_mcp.contracts import (
     SearchResult,
     SourceUnavailableError,
 )
+from opendata_campus_mcp.domain.url_policy import PublicEducationUrlPolicy
 
 log = logging.getLogger(__name__)
 
 _BASE = "https://market.cloud.edu.tw/api"
+_API_HOST = "market.cloud.edu.tw"
 _USER_AGENT = "Education-Resource-Browser-MCP/1.0 (non-commercial; user-triggered)"
 _MAX_SUMMARY_CHARS = 500
 _TIMEOUT = 20.0
@@ -55,9 +58,10 @@ class EduMarketApiAdapter:
         self._client = httpx.AsyncClient(
             headers={"User-Agent": _USER_AGENT},
             timeout=_TIMEOUT,
-            follow_redirects=True,
+            follow_redirects=False,  # 跳轉逐跳驗證,見 safe_get_fixed_host
             verify=build_ssl_context(),
         )
+        self._url_policy = PublicEducationUrlPolicy([_API_HOST])
 
     async def browse(
         self, source: EducationSource, request: BrowseRequest
@@ -77,7 +81,9 @@ class EduMarketApiAdapter:
         log.debug("edumarket browse: GET /v2/search/edumarket/%s", kw)
 
         try:
-            resp = await self._client.get(url)
+            resp = await safe_get_fixed_host(
+                self._client, url, url_policy=self._url_policy
+            )
         except httpx.TransportError as exc:
             raise SourceUnavailableError(source.name, source.official_url, str(exc))
 
