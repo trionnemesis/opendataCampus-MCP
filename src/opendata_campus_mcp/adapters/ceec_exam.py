@@ -18,6 +18,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from opendata_campus_mcp.adapters._http import build_ssl_context
+from opendata_campus_mcp.adapters.safe_http import safe_get_fixed_host
 from opendata_campus_mcp.contracts import (
     ExamQuestionResult,
     ExamSearchRequest,
@@ -25,6 +26,7 @@ from opendata_campus_mcp.contracts import (
     SourceUnavailableError,
 )
 from opendata_campus_mcp.domain.browser_policy import BrowserPolicy
+from opendata_campus_mcp.domain.url_policy import PublicEducationUrlPolicy
 
 log = logging.getLogger(__name__)
 
@@ -53,9 +55,10 @@ class CeecExamAdapter:
         self._client = httpx.AsyncClient(
             headers={"User-Agent": _USER_AGENT},
             timeout=_TIMEOUT,
-            follow_redirects=True,
+            follow_redirects=False,  # 跳轉逐跳驗證,見 safe_get_fixed_host
             verify=build_ssl_context(),  # CEEC 是 .edu.tw 政府站
         )
+        self._url_policy = PublicEducationUrlPolicy([_DOMAIN])
 
     async def search(self, request: ExamSearchRequest) -> list[ExamQuestionResult]:
         xsmsid = _XSMSID.get(request.exam_type)
@@ -97,7 +100,9 @@ class CeecExamAdapter:
     async def _fetch(self, url: str) -> str:
         log.debug("ceec_exam: GET %s", url)
         try:
-            resp = await self._client.get(url)
+            resp = await safe_get_fixed_host(
+                self._client, url, url_policy=self._url_policy
+            )
         except httpx.TransportError as exc:
             raise SourceUnavailableError("CEEC 大考中心", url, str(exc))
         if resp.status_code in (401, 403):
