@@ -20,7 +20,9 @@ from opendata_campus_mcp.contracts import (
     DiscoveryRequest,
     EducationSource,
 )
+from opendata_campus_mcp.adapters.safe_http import safe_get_fixed_host
 from opendata_campus_mcp.domain.browser_policy import BrowserPolicy
+from opendata_campus_mcp.domain.url_policy import PublicEducationUrlPolicy
 
 log = logging.getLogger(__name__)
 
@@ -40,8 +42,9 @@ class TwCampusDirectoryAdapter:
         self._client = httpx.AsyncClient(
             headers={"User-Agent": _USER_AGENT},
             timeout=15.0,
-            follow_redirects=True,
+            follow_redirects=False,  # 跳轉逐跳驗證,見 safe_get_fixed_host
         )
+        self._url_policy = PublicEducationUrlPolicy([_TWCAMPUS_DOMAIN])
 
     async def discover(self, request: DiscoveryRequest) -> list[EducationSource]:
         """從 TWCampus 首頁解析平台列表並依 request 過濾。
@@ -52,7 +55,9 @@ class TwCampusDirectoryAdapter:
         self._policy.check_page_limit(pages_used=0)  # 首頁 = page 1/2
 
         try:
-            resp = await self._client.get(_TWCAMPUS_URL)
+            resp = await safe_get_fixed_host(
+                self._client, _TWCAMPUS_URL, url_policy=self._url_policy
+            )
             resp.raise_for_status()
         except httpx.HTTPError as exc:
             log.warning("TWCampus fetch failed: %s", exc)
