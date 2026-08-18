@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 # 最小權限原則（CWE-284 / OWASP CICD-SEC-3）：workflow 只需 checkout 原始碼即可跑測試，
-# 明確宣告 read-only，避免依賴 repo 預設 GITHUB_TOKEN 權限（可能較寬）。
+# 明確宣告 read-only；未宣告時會沿用 repository 預設的 GITHUB_TOKEN 權限（可能為 write-all）。
 permissions:
   contents: read
 
@@ -19,7 +19,7 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      # 第三方 action 鎖 commit SHA:tag 可被上游改指,SHA 不可
+      # 第三方 action 一律鎖 commit SHA：浮動 tag 可被上游重新指向（供應鏈風險）
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Python ${{ matrix.python-version }}
