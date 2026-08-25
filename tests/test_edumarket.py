@@ -136,6 +136,26 @@ async def test_keyword_is_path_encoded():
 
 
 @pytest.mark.asyncio
+async def test_api_key_with_special_chars_is_query_encoded():
+    """安全回歸:金鑰含 & / # / 空白時不得被解讀成參數分隔或 fragment。"""
+    captured: dict[str, httpx.Request] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["req"] = request
+        return httpx.Response(200, json=_envelope([]))
+
+    key = "ab&cd#ef gh"
+    await _adapter_with(handler, api_key=key).browse(_SOURCE, _REQ)
+    url = captured["req"].url
+    # 完整金鑰原樣抵達 key 參數,沒有被 & 截斷、也沒被 # 推進 fragment
+    assert url.params["key"] == key
+    assert url.fragment == ""
+    assert url.params["rows"] == "5"
+    # 原始 query string 已 percent-encode,不含裸露的分隔字元
+    assert "&cd" not in str(url.query, "ascii").split("key=")[1].split("&")[0]
+
+
+@pytest.mark.asyncio
 async def test_no_key_raises_unavailable(monkeypatch):
     monkeypatch.delenv("EDUMARKET_API_KEY", raising=False)
     adapter = EduMarketApiAdapter(api_key=None)
