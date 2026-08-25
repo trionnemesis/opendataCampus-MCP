@@ -1,3 +1,8 @@
+# Secrets and environment files（本專案讀 EDUMARKET_API_KEY）
+.env
+.env.*
+!.env.example
+
 __pycache__/
 *.py[cod]
 *.egg-info/
