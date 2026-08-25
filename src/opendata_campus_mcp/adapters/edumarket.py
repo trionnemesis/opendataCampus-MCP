@@ -68,16 +68,21 @@ class EduMarketApiAdapter:
                 source.name, source.official_url, "EDUMARKET_API_KEY not configured"
             )
 
-        # keyword 是 path 參數（中文需 encode）；key/page/rows 為 query
+        # keyword 是 path 參數（中文需 encode）；key/page/rows 為 query。
+        # query 交給 httpx params= 編碼:金鑰若含 & / # / 空白等字元,字串內插
+        # 會被解讀成參數分隔或 fragment，導致金鑰被截斷或外溢到錯誤的欄位。
         kw = quote(request.query, safe="")
-        url = (
-            f"{_BASE}/v2/search/edumarket/{kw}"
-            f"?key={self._api_key}&page=1&rows={request.max_results}"
-        )
+        url = f"{_BASE}/v2/search/edumarket/{kw}"
+        params = {
+            "key": self._api_key,
+            "page": "1",
+            "rows": str(request.max_results),
+        }
+        # 不記 URL 全文:key 是 query 參數,整串進 log 等同把金鑰寫進日誌
         log.debug("edumarket browse: GET /v2/search/edumarket/%s", kw)
 
         try:
-            resp = await self._client.get(url)
+            resp = await self._client.get(url, params=params)
         except httpx.TransportError as exc:
             raise SourceUnavailableError(source.name, source.official_url, str(exc))
 
