@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from urllib.parse import quote, urljoin
+from urllib.parse import quote
 
 import httpx
 from bs4 import BeautifulSoup, Tag
@@ -27,7 +27,10 @@ from opendata_campus_mcp.contracts import (
     SourceUnavailableError,
 )
 from opendata_campus_mcp.domain.browser_policy import BrowserPolicy
-from opendata_campus_mcp.domain.url_policy import PublicEducationUrlPolicy
+from opendata_campus_mcp.domain.url_policy import (
+    PublicEducationUrlPolicy,
+    safe_result_url,
+)
 from opendata_campus_mcp.repository.source_cache import get_known_sources
 
 log = logging.getLogger(__name__)
@@ -145,9 +148,11 @@ class WebSearchAdapter:
             link = item.find("a", href=True)
             if not link:
                 continue
-            href: str = link["href"]
-            if not href.startswith("http"):
-                href = urljoin(source.official_url, href)
+            # href 來自遠端 HTML;urljoin 對 javascript:/data: 是原樣回傳,
+            # 必須明確過濾 scheme 才不會把可執行連結交給 client(CWE-79)。
+            href = safe_result_url(link["href"], source.official_url)
+            if not href:
+                continue
 
             title = link.get_text(strip=True)
             if not title or len(title) < 2:

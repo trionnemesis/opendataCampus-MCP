@@ -12,7 +12,11 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
 ]
 dependencies = [
-    "fastmcp>=0.2.0",
+    # >=3.2.0:低於此版本的 fastmcp 共有 6 項已知通報,其中
+    # PYSEC-2026-2475 / PYSEC-2026-2476 需 3.2.0 才修復
+    # (較舊的 PYSEC-2026-1364/1365/2474、GHSA-rcfx-77hg-w2wv 於 2.13/2.14 修復)。
+    # 目前解析安裝的是 4.0.0,此處只是不讓乾淨環境有機會裝到有漏洞的版本。
+    "fastmcp>=3.2.0",
     "httpx>=0.27",
     "beautifulsoup4>=4.12",
     # 台灣政府教育平台憑證部分缺 Subject Key Identifier，改用 OS 系統信任庫驗證
@@ -24,6 +28,9 @@ headless = ["playwright>=1.44"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    # CI 的 SAST / SCA gate 由此取得,本機可用同一組指令重現
+    "bandit>=1.7",
+    "pip-audit>=2.7",
 ]
 
 [project.scripts]

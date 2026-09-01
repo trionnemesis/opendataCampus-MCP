@@ -33,6 +33,19 @@ log = logging.getLogger(__name__)
 
 
 class EdBrowserService:
+    # MCP 工具字串參數的長度上限。這些值會被 URL-encode 進外送 URL、
+    # 進到評分迴圈與錯誤訊息;不設限時單一呼叫即可送進 MB 級字串造成
+    # 不必要的資源耗用(CWE-20 / CWE-400)。上限遠大於任何真實查詢。
+    _MAX_QUERY_LEN = 200
+    _MAX_URL_LEN = 2048
+
+    @classmethod
+    def _check_len(cls, value: str | None, *, name: str, max_len: int) -> None:
+        if value is not None and len(value) > max_len:
+            raise PolicyViolationError(
+                f"{name} too long ({len(value)} chars, max {max_len})"
+            )
+
     def __init__(
         self,
         policy: BrowserPolicy,
@@ -56,6 +69,11 @@ class EdBrowserService:
     # ── discover_education_sources ────────────────────────────────────────────
 
     async def discover_sources(self, request: DiscoveryRequest) -> list[dict[str, Any]]:
+        self._check_len(request.query, name="query", max_len=self._MAX_QUERY_LEN)
+        self._check_len(
+            request.education_stage, name="education_stage", max_len=self._MAX_QUERY_LEN
+        )
+        self._check_len(request.subject, name="subject", max_len=self._MAX_QUERY_LEN)
         known = list(get_known_sources().values())
         ranked = self._router.score_sources(known, request)  # [(score, source)]
 
@@ -84,6 +102,10 @@ class EdBrowserService:
     # ── browse_education_source ───────────────────────────────────────────────
 
     async def browse_source(self, request: BrowseRequest) -> dict[str, Any]:
+        self._check_len(request.query, name="query", max_len=self._MAX_QUERY_LEN)
+        self._check_len(
+            request.source_name_or_url, name="source", max_len=self._MAX_URL_LEN
+        )
         source = (
             self._router.find_by_name(request.source_name_or_url)
             or self._router.find_by_url(request.source_name_or_url)
@@ -117,6 +139,7 @@ class EdBrowserService:
     async def read_resource(self, request: ReadRequest) -> dict[str, Any]:
         # 依資源頁 URL host 找來源 → 取對應 adapter（OPEN_DATA dataset 頁走 OpenData
         # adapter 的結構化 read；其餘 / 未知 host 落 fallback 的 HTML 擷取）。
+        self._check_len(request.url, name="url", max_len=self._MAX_URL_LEN)
         self._url_policy.validate(request.url)
         source = self._router.find_by_host(request.url)
         if source is None:
@@ -127,6 +150,8 @@ class EdBrowserService:
     # ── search_exam_questions ─────────────────────────────────────────────────
 
     async def search_exam_questions(self, request: ExamSearchRequest) -> dict[str, Any]:
+        self._check_len(request.year, name="year", max_len=self._MAX_QUERY_LEN)
+        self._check_len(request.subject, name="subject", max_len=self._MAX_QUERY_LEN)
         if self._exam_adapter is None:
             raise SourceUnavailableError(
                 "CEEC 大考中心", "https://www.ceec.edu.tw",

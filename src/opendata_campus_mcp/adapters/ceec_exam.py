@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
-from urllib.parse import urljoin
+from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -25,10 +25,12 @@ from opendata_campus_mcp.contracts import (
     SourceUnavailableError,
 )
 from opendata_campus_mcp.domain.browser_policy import BrowserPolicy
+from opendata_campus_mcp.domain.url_policy import safe_result_url
 
 log = logging.getLogger(__name__)
 
 _BASE = "https://www.ceec.edu.tw"
+_BASE_HOST = urlparse(_BASE).hostname or ""
 _DOMAIN = "www.ceec.edu.tw"
 _USER_AGENT = "Education-Resource-Browser-MCP/1.0 (non-commercial; user-triggered)"
 _TIMEOUT = 20.0
@@ -43,6 +45,15 @@ _XSMSID: dict[str, str] = {
 _YEAR_RE = re.compile(r"^(\d{2,3})學年度")
 _PAREN_RE = re.compile(r"[（(].*?[）)]")
 _DASHES = ("－", "—", "-")
+
+
+def _ceec_download_url(href: str) -> str | None:
+    """把 listing 的試題 href 解析成 CEEC 網域內的絕對 URL;跨站則回 None。"""
+    resolved = safe_result_url(href, _BASE)
+    if not resolved:
+        return None
+    host = (urlparse(resolved).hostname or "").lower().rstrip(".")
+    return resolved if host == _BASE_HOST else None
 
 
 class CeecExamAdapter:
@@ -130,6 +141,13 @@ class CeecExamAdapter:
             for a in pdf_links:
                 label = a.get_text(strip=True)
                 file_title = (a.get("title") or label).strip()
+                # "/files/file_pool/" 是子字串比對,一個絕對 href
+                # (https://evil.example/files/file_pool/x.pdf)同樣會通過;
+                # 解析後必須確認仍落在 CEEC 網域才回傳(CWE-601)。
+                download_url = _ceec_download_url(a["href"])
+                if not download_url:
+                    log.warning("skipped off-site exam href on CEEC listing")
+                    continue
                 results.append(
                     ExamQuestionResult(
                         exam_type=exam_type,
@@ -137,7 +155,7 @@ class CeecExamAdapter:
                         subject=subject,
                         paper_type=self._classify_paper_type(label, file_title),
                         title=file_title,
-                        download_url=urljoin(_BASE, a["href"]),
+                        download_url=download_url,
                         source=source,
                         published=published,
                     )
