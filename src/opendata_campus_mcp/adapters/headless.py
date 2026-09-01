@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import warnings
+from urllib.parse import quote
 
 from opendata_campus_mcp.contracts import (
     AccessStrategy,
@@ -21,6 +22,11 @@ from opendata_campus_mcp.contracts import (
     EducationSource,
     SearchResult,
 )
+from opendata_campus_mcp.domain.url_policy import (
+    PublicEducationUrlPolicy,
+    safe_result_url,
+)
+from opendata_campus_mcp.repository.source_cache import get_known_sources
 
 log = logging.getLogger(__name__)
 
@@ -31,7 +37,11 @@ class HeadlessAdapter:
     access_strategy = AccessStrategy.HEADLESS_BROWSER
     source_id = "headless-browser"
 
-    def __init__(self, enabled: bool = False) -> None:
+    def __init__(
+        self,
+        enabled: bool = False,
+        url_policy: PublicEducationUrlPolicy | None = None,
+    ) -> None:
         if not enabled:
             raise RuntimeError(
                 "HeadlessAdapter is disabled by default. "
@@ -43,6 +53,22 @@ class HeadlessAdapter:
             stacklevel=2,
         )
         self._enabled = enabled
+        self._url_policy = url_policy or PublicEducationUrlPolicy.from_sources(
+            get_known_sources().values()
+        )
+
+    def _build_search_url(self, source: EducationSource, query: str) -> str:
+        """組出搜尋 URL 並套用兩個護欄(與 WebSearchAdapter 的 safe_get 對齊)。
+
+        1. query 必須 URL-encode。未編碼時 query 內的 & / # 會被當成語法
+           字元,足以竄改甚至截斷整個 URL(CWE-20)。
+        2. 送進瀏覽器前套用 url_policy。此 adapter 先前完全繞過目錄白名單
+           —— 一個被污染的 source.official_url 就能讓無頭瀏覽器連往任意
+           主機(CWE-918);驗證必須發生在 playwright 啟動之前。
+        """
+        search_url = f"{source.official_url.rstrip('/')}?q={quote(query, safe='')}"
+        self._url_policy.validate(search_url)
+        return search_url
 
     async def browse(
         self, source: EducationSource, request: BrowseRequest
@@ -50,7 +76,7 @@ class HeadlessAdapter:
         # Playwright import 延遲至實際呼叫，避免啟動成本
         from playwright.async_api import async_playwright  # type: ignore[import]
 
-        search_url = f"{source.official_url.rstrip('/')}?q={request.query}"
+        search_url = self._build_search_url(source, request.query)
         log.warning("headless browse: GET %s", search_url)
 
         async with async_playwright() as p:
@@ -73,13 +99,22 @@ class HeadlessAdapter:
             await page.close()
             await browser.close()
 
-        return [
-            SearchResult(
-                title=item["title"],
-                url=item["url"],
-                summary="",
-                source_name=source.name,
-                source_url=source.official_url,
+        # 頁內 JS 只濾掉 javascript:,data: / blob: 等仍會通過;統一走與其他
+        # adapter 相同的 scheme 白名單,不把可執行連結交給 client(CWE-79)。
+        results: list[SearchResult] = []
+        for item in raw:
+            url = safe_result_url(item["url"], search_url)
+            if not url:
+                continue
+            results.append(
+                SearchResult(
+                    title=item["title"],
+                    url=url,
+                    summary="",
+                    source_name=source.name,
+                    source_url=source.official_url,
+                )
             )
-            for item in raw[: request.max_results]
-        ]
+            if len(results) >= request.max_results:
+                break
+        return results
