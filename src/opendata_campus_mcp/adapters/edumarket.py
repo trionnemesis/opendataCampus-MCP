@@ -29,6 +29,7 @@ from opendata_campus_mcp.contracts import (
     SearchResult,
     SourceUnavailableError,
 )
+from opendata_campus_mcp.domain.url_policy import safe_result_url
 
 log = logging.getLogger(__name__)
 
@@ -130,9 +131,12 @@ class EduMarketApiAdapter:
         # publisher 取首位貢獻者機構；copyright 是「授權」,勿混為 publisher
         contributors = item.get("contributor") or []
         publisher = contributors[0].get("org") if contributors else None
+        # url 直接來自第三方 API 的 JSON;非 http(s) 的 scheme 不回傳給 client
+        # (CWE-79),解析失敗則留空字串維持既有欄位形狀。
+        safe_url = safe_result_url(item.get("url", ""), source.official_url) or ""
         return SearchResult(
             title=item.get("title", ""),
-            url=item.get("url", ""),
+            url=safe_url,
             summary=(item.get("desc") or "")[:_MAX_SUMMARY_CHARS],
             source_name=source.name,
             source_url=source.official_url,
