@@ -25,6 +25,12 @@ from opendata_campus_mcp.contracts import (
     ReadRequest,
     SourceUnavailableError,
 )
+from opendata_campus_mcp.domain.input_guard import (
+    MAX_SOURCE_LEN,
+    MAX_URL_LEN,
+    clamp_count,
+    validate_text,
+)
 from opendata_campus_mcp.mcp_server.runtime import build_runtime
 
 _INSTRUCTIONS = """\
@@ -83,13 +89,16 @@ def build_server() -> FastMCP:
         回傳每個平台的 name、official_url、categories、directory_source。
         TWCampus 僅作路由目錄，不作為資源倉庫；本地目錄優先。
         """
-        req = DiscoveryRequest(
-            query=query,
-            education_stage=education_stage,
-            subject=subject,
-            max_sources=min(max_sources, 5),
-        )
         try:
+            validate_text(query, "query")
+            validate_text(education_stage, "education_stage")
+            validate_text(subject, "subject")
+            req = DiscoveryRequest(
+                query=query,
+                education_stage=education_stage,
+                subject=subject,
+                max_sources=clamp_count(max_sources, 5),
+            )
             return await service.discover_sources(req)
         except RateLimitError as exc:
             return [{"error": "rate_limited", "message": str(exc)}]
@@ -110,12 +119,14 @@ def build_server() -> FastMCP:
         回傳 results 列表，每筆含 title、url、summary、source_name、source_url。
         max_results 上限 5；不嘗試登入或繞過任何存取控制。
         """
-        req = BrowseRequest(
-            source_name_or_url=source,
-            query=query,
-            max_results=min(max_results, 5),
-        )
         try:
+            validate_text(source, "source", max_len=MAX_SOURCE_LEN)
+            validate_text(query, "query")
+            req = BrowseRequest(
+                source_name_or_url=source,
+                query=query,
+                max_results=clamp_count(max_results, 5),
+            )
             return await service.browse_source(req)
         except SourceUnavailableError as exc:
             return {
@@ -148,8 +159,9 @@ def build_server() -> FastMCP:
             "title", "summary", "publisher",
             "education_stage", "subject", "license",
         ]
-        req = ReadRequest(url=url, extract=tuple(fields))
         try:
+            validate_text(url, "url", max_len=MAX_URL_LEN)
+            req = ReadRequest(url=url, extract=tuple(fields))
             return await service.read_resource(req)
         except LoginRequiredError as exc:
             return {"error": "login_required", "url": url, "message": str(exc)}
@@ -185,13 +197,15 @@ def build_server() -> FastMCP:
                            "會考因 robots.txt Disallow 不納入",
                 "exam_type": exam_type,
             }
-        req = ExamSearchRequest(
-            exam_type=exam_type,
-            year=year,
-            subject=subject,
-            max_results=min(max_results, 20),
-        )
         try:
+            validate_text(year, "year")
+            validate_text(subject, "subject")
+            req = ExamSearchRequest(
+                exam_type=exam_type,
+                year=year,
+                subject=subject,
+                max_results=clamp_count(max_results, 20),
+            )
             return await service.search_exam_questions(req)
         except RateLimitError as exc:
             return {"error": "rate_limited", "message": str(exc)}
