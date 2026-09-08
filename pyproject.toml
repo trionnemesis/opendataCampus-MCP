@@ -24,6 +24,9 @@ headless = ["playwright>=1.44"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    # CI 安全閘門(SAST / SCA);與 g0VMCP、hcmcp 的 dev extras 對齊
+    "bandit>=1.7",
+    "pip-audit>=2.7",
 ]
 
 [project.scripts]
