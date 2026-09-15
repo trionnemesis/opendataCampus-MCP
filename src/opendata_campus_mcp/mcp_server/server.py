@@ -26,6 +26,15 @@ from opendata_campus_mcp.contracts import (
     SourceUnavailableError,
 )
 from opendata_campus_mcp.mcp_server.runtime import build_runtime
+from opendata_campus_mcp.mcp_server.validation import (
+    MAX_FIELD_LEN,
+    MAX_QUERY_LEN,
+    MAX_SOURCE_LEN,
+    MAX_URL_LEN,
+    InputValidationError,
+    check_len,
+    clamp_count,
+)
 
 _INSTRUCTIONS = """\
 教育資源導航 MCP — 以 TWCampus 作為目錄入口，路由至台灣官方教育平台搜尋。
@@ -83,11 +92,17 @@ def build_server() -> FastMCP:
         回傳每個平台的 name、official_url、categories、directory_source。
         TWCampus 僅作路由目錄，不作為資源倉庫；本地目錄優先。
         """
+        try:
+            check_len(query, name="query", max_len=MAX_QUERY_LEN)
+            check_len(education_stage, name="education_stage", max_len=MAX_FIELD_LEN)
+            check_len(subject, name="subject", max_len=MAX_FIELD_LEN)
+        except InputValidationError as exc:
+            return [{"error": "invalid_input", "message": str(exc)}]
         req = DiscoveryRequest(
             query=query,
             education_stage=education_stage,
             subject=subject,
-            max_sources=min(max_sources, 5),
+            max_sources=clamp_count(max_sources, max_value=5),
         )
         try:
             return await service.discover_sources(req)
@@ -110,10 +125,15 @@ def build_server() -> FastMCP:
         回傳 results 列表，每筆含 title、url、summary、source_name、source_url。
         max_results 上限 5；不嘗試登入或繞過任何存取控制。
         """
+        try:
+            check_len(source, name="source", max_len=MAX_SOURCE_LEN)
+            check_len(query, name="query", max_len=MAX_QUERY_LEN)
+        except InputValidationError as exc:
+            return {"error": "invalid_input", "message": str(exc)}
         req = BrowseRequest(
             source_name_or_url=source,
             query=query,
-            max_results=min(max_results, 5),
+            max_results=clamp_count(max_results, max_value=5),
         )
         try:
             return await service.browse_source(req)
@@ -144,6 +164,10 @@ def build_server() -> FastMCP:
         回傳物件包含 url 來源欄位；summary 不超過 500 字元。
         不嘗試登入或繞過任何存取控制。
         """
+        try:
+            check_len(url, name="url", max_len=MAX_URL_LEN)
+        except InputValidationError as exc:
+            return {"error": "invalid_input", "message": str(exc)}
         fields = extract or [
             "title", "summary", "publisher",
             "education_stage", "subject", "license",
@@ -185,11 +209,16 @@ def build_server() -> FastMCP:
                            "會考因 robots.txt Disallow 不納入",
                 "exam_type": exam_type,
             }
+        try:
+            check_len(year, name="year", max_len=MAX_FIELD_LEN)
+            check_len(subject, name="subject", max_len=MAX_FIELD_LEN)
+        except InputValidationError as exc:
+            return {"error": "invalid_input", "message": str(exc)}
         req = ExamSearchRequest(
             exam_type=exam_type,
             year=year,
             subject=subject,
-            max_results=min(max_results, 20),
+            max_results=clamp_count(max_results, max_value=20),
         )
         try:
             return await service.search_exam_questions(req)
