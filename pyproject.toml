@@ -12,7 +12,9 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
 ]
 dependencies = [
-    "fastmcp>=0.2.0",
+    # >=3.2.0:低於此版本的 fastmcp 受 PYSEC-2026-2475 / PYSEC-2026-2476 影響
+    # (另有 PYSEC-2026-1364/1365、PYSEC-2026-2474、GHSA-rcfx-77hg-w2wv 於更早版本修掉)
+    "fastmcp>=3.2.0",
     "httpx>=0.27",
     "beautifulsoup4>=4.12",
     # 台灣政府教育平台憑證部分缺 Subject Key Identifier，改用 OS 系統信任庫驗證
@@ -22,8 +24,12 @@ dependencies = [
 [project.optional-dependencies]
 headless = ["playwright>=1.44"]
 dev = [
-    "pytest>=8.0",
+    # >=9.0.3:更早的版本受 PYSEC-2026-1845 影響(/tmp/pytest-of-{user} 可預測路徑,
+    # 本機使用者可藉此 DoS 或提權)。僅影響開發/CI 環境,不進 runtime 相依。
+    "pytest>=9.0.3",
     "pytest-asyncio>=0.23",
+    "bandit>=1.7",
+    "pip-audit>=2.7",
 ]
 
 [project.scripts]
