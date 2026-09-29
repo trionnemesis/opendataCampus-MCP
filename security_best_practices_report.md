@@ -4,7 +4,9 @@
 
 This review focused on the MCP server security boundary and live data retrieval behavior. The original review found a permissive outbound-fetch boundary. The 2026-07-03 Phase 1 implementation closes direct arbitrary browse/read inputs and validates WebSearch redirects before fetching them.
 
-Remaining priorities: add response body/content-type limits, sanitize allowed URL logs and transport errors, apply the shared HTTP boundary to non-WebSearch adapters, and generate dated source-health artifacts.
+The 2026-09-29 Phase 2 implementation applies the shared HTTP boundary to every adapter and bounds response bodies and content types.
+
+Remaining priorities: sanitize allowed URL logs and transport errors (SEC-5), generate dated source-health artifacts (DATA-1), and decide whether the `www.`-stripping in `_catalog_domain()` should keep widening each allowlist entry from a single host to a whole registrable domain.
 
 Evidence boundary: repository-local review only. No live website probing was performed. The installed security guidance has Python web framework references for Flask/FastAPI/Django, but no FastMCP/MCP-specific or Python general backend reference, so findings below use repo evidence plus common Python/httpx/MCP security practice.
 
@@ -31,7 +33,7 @@ Recommendation:
 
 ### SEC-2 High: `BrowserPolicy` is not enforced for `browse` and `read`
 
-Status (2026-07-03): **Partially remediated.** `WebSearchAdapter` browse/read and every redirect hop now consume the shared `BrowserPolicy` page/rate budget. `EduMarketApiAdapter` and `OpenDataApiAdapter` still use their own fixed-endpoint HTTP clients and must move behind the same gateway in the operational-hardening phase.
+Status (2026-09-29): **Remediated.** `EduMarketApiAdapter`, `OpenDataApiAdapter`, `CeecExamAdapter` and `TwCampusDirectoryAdapter` now route through `safe_http.safe_get`. `BrowserPolicy` is deliberately optional on that helper: `CeecExamAdapter` and `TwCampusDirectoryAdapter` already consume the budget themselves, and double counting would make their own paging trip the limit. `tests/test_adapter_http_boundary.py` asserts the shared boundary is in force for all four.
 
 Impact: the documented per-domain request limit can be bypassed through repeated `browse_education_source` or `read_education_resource` calls.
 
@@ -49,7 +51,9 @@ Recommendation:
 
 ### SEC-3 Medium: redirects and parsed links can escape the intended source boundary
 
-Status (2026-07-03): **Partially remediated.** `WebSearchAdapter` disables automatic redirects and validates every redirect target before the next GET. TWCampus and fixed-endpoint API adapters still use automatic redirects, and parsed browse links are not yet filtered at result construction time.
+Status (2026-09-29): **Remediated for redirects; link filtering still open.** All four remaining adapters now build their clients with `follow_redirects=False` and validate every hop through `safe_get` before it is requested. `safe_get` also caps the redirect chain independently of `BrowserPolicy`. `tests/test_adapter_http_boundary.py` proves the rejected target is never requested (not merely that an exception is raised) and guards against `follow_redirects` being turned back on.
+
+Still open: parsed browse links are not filtered at result construction time, so an off-domain link returned by a trusted source is still surfaced as a result. It cannot be fetched without passing the policy, but it is not labelled as off-domain.
 
 Impact: a trusted-looking education source or search result can lead the tool to non-education or internal targets through redirects or off-domain links.
 
@@ -66,6 +70,8 @@ Recommendation:
 - Represent off-domain links explicitly instead of treating them as same-source resources.
 
 ### SEC-4 Medium: response body size and content type are not bounded before parsing
+
+Status (2026-09-29): **Remediated.** `safe_http.safe_get` streams every response under a 5 MiB cap (`MAX_RESPONSE_BYTES`): a declared `Content-Length` over the cap is rejected before the body is read, and the accumulated chunks are checked as they arrive so a falsified header cannot get past it. The final response's media type must fall in a text/JSON/XML allowlist; 3xx responses are exempt because their bodies are never parsed. The bounded body is reassembled into a fresh `httpx.Response` via the public API with `content-encoding`/`content-length` dropped, so `.text` and `.json()` behave as before. Covered by `tests/test_safe_http.py`.
 
 Impact: a caller can cause the server to download and parse unexpectedly large or non-HTML responses, creating memory/latency risk even though returned summaries are capped.
 
