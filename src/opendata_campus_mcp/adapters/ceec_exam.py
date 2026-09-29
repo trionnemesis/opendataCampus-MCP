@@ -18,6 +18,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from opendata_campus_mcp.adapters._http import build_ssl_context
+from opendata_campus_mcp.adapters.safe_http import safe_get
 from opendata_campus_mcp.contracts import (
     ExamQuestionResult,
     ExamSearchRequest,
@@ -25,6 +26,8 @@ from opendata_campus_mcp.contracts import (
     SourceUnavailableError,
 )
 from opendata_campus_mcp.domain.browser_policy import BrowserPolicy
+from opendata_campus_mcp.domain.url_policy import PublicEducationUrlPolicy
+from opendata_campus_mcp.repository.source_cache import get_known_sources
 
 log = logging.getLogger(__name__)
 
@@ -50,10 +53,16 @@ class CeecExamAdapter:
 
     def __init__(self, policy: BrowserPolicy) -> None:
         self._policy = policy
+        # 固定端點仍需逐跳驗證 redirect:上游 open redirect 或站台被入侵時,
+        # follow_redirects=True 會把請求帶往 localhost / 雲端 metadata(CWE-918)。
+        # 沿用與 WebSearchAdapter 相同的 catalog 白名單作為信任邊界。
+        self._url_policy = PublicEducationUrlPolicy.from_sources(
+            get_known_sources().values()
+        )
         self._client = httpx.AsyncClient(
             headers={"User-Agent": _USER_AGENT},
             timeout=_TIMEOUT,
-            follow_redirects=True,
+            follow_redirects=False,
             verify=build_ssl_context(),  # CEEC 是 .edu.tw 政府站
         )
 
@@ -97,7 +106,9 @@ class CeecExamAdapter:
     async def _fetch(self, url: str) -> str:
         log.debug("ceec_exam: GET %s", url)
         try:
-            resp = await self._client.get(url)
+            resp = await safe_get(
+                self._client, url, url_policy=self._url_policy
+            )
         except httpx.TransportError as exc:
             raise SourceUnavailableError("CEEC 大考中心", url, str(exc))
         if resp.status_code in (401, 403):

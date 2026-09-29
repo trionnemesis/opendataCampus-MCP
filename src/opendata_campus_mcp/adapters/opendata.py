@@ -21,6 +21,7 @@ from typing import Any
 import httpx
 
 from opendata_campus_mcp.adapters._http import build_ssl_context
+from opendata_campus_mcp.adapters.safe_http import safe_get
 from opendata_campus_mcp.contracts import (
     AccessStrategy,
     BrowseRequest,
@@ -28,10 +29,12 @@ from opendata_campus_mcp.contracts import (
     SearchResult,
     SourceUnavailableError,
 )
+from opendata_campus_mcp.domain.url_policy import PublicEducationUrlPolicy
 from opendata_campus_mcp.repository.opendata_catalog import (
     OpenDataset,
     get_opendata_catalog,
 )
+from opendata_campus_mcp.repository.source_cache import get_known_sources
 
 log = logging.getLogger(__name__)
 
@@ -48,10 +51,16 @@ class OpenDataApiAdapter:
     access_strategy = AccessStrategy.OPEN_DATA
 
     def __init__(self) -> None:
+        # 固定端點仍需逐跳驗證 redirect:上游 open redirect 或站台被入侵時,
+        # follow_redirects=True 會把請求帶往 localhost / 雲端 metadata(CWE-918)。
+        # 沿用與 WebSearchAdapter 相同的 catalog 白名單作為信任邊界。
+        self._url_policy = PublicEducationUrlPolicy.from_sources(
+            get_known_sources().values()
+        )
         self._client = httpx.AsyncClient(
             headers={"User-Agent": _USER_AGENT},
             timeout=_TIMEOUT,
-            follow_redirects=True,
+            follow_redirects=False,
             verify=build_ssl_context(),
         )
 
@@ -82,7 +91,9 @@ class OpenDataApiAdapter:
         log.debug("opendata read: GET %s", api_url)
 
         try:
-            resp = await self._client.get(api_url)
+            resp = await safe_get(
+                self._client, api_url, url_policy=self._url_policy
+            )
         except httpx.TransportError as exc:
             raise SourceUnavailableError("政府資料開放平臺", url, str(exc))
         if resp.status_code >= 400:
