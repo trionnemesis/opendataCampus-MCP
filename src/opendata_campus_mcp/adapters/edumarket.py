@@ -20,6 +20,7 @@ from urllib.parse import quote
 import httpx
 
 from opendata_campus_mcp.adapters._http import build_ssl_context
+from opendata_campus_mcp.adapters.safe_http import safe_get
 from opendata_campus_mcp.contracts import (
     AccessStrategy,
     BrowseAdapter,
@@ -29,6 +30,8 @@ from opendata_campus_mcp.contracts import (
     SearchResult,
     SourceUnavailableError,
 )
+from opendata_campus_mcp.domain.url_policy import PublicEducationUrlPolicy
+from opendata_campus_mcp.repository.source_cache import get_known_sources
 
 log = logging.getLogger(__name__)
 
@@ -52,10 +55,16 @@ class EduMarketApiAdapter:
         self._api_key = api_key or os.environ.get("EDUMARKET_API_KEY")
         # read 無 by-id 詳情端點,委派給 HTML reader
         self._html_reader = html_reader
+        # 固定端點仍需逐跳驗證 redirect:上游 open redirect 或站台被入侵時,
+        # follow_redirects=True 會把請求帶往 localhost / 雲端 metadata(CWE-918)。
+        # 沿用與 WebSearchAdapter 相同的 catalog 白名單作為信任邊界。
+        self._url_policy = PublicEducationUrlPolicy.from_sources(
+            get_known_sources().values()
+        )
         self._client = httpx.AsyncClient(
             headers={"User-Agent": _USER_AGENT},
             timeout=_TIMEOUT,
-            follow_redirects=True,
+            follow_redirects=False,
             verify=build_ssl_context(),
         )
 
@@ -77,7 +86,9 @@ class EduMarketApiAdapter:
         log.debug("edumarket browse: GET /v2/search/edumarket/%s", kw)
 
         try:
-            resp = await self._client.get(url)
+            resp = await safe_get(
+                self._client, url, url_policy=self._url_policy
+            )
         except httpx.TransportError as exc:
             raise SourceUnavailableError(source.name, source.official_url, str(exc))
 

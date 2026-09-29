@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import warnings
+from urllib.parse import quote, urlencode
 
 from opendata_campus_mcp.contracts import (
     AccessStrategy,
@@ -21,6 +22,8 @@ from opendata_campus_mcp.contracts import (
     EducationSource,
     SearchResult,
 )
+from opendata_campus_mcp.domain.url_policy import PublicEducationUrlPolicy
+from opendata_campus_mcp.repository.source_cache import get_known_sources
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +46,23 @@ class HeadlessAdapter:
             stacklevel=2,
         )
         self._enabled = enabled
+        # goto() 的目標仍須落在 catalog 白名單內(headless 亦是對外請求)
+        self._url_policy = PublicEducationUrlPolicy.from_sources(
+            get_known_sources().values()
+        )
+
+    def build_search_url(self, source: EducationSource, query: str) -> str:
+        """組出 goto() 目標並驗證。
+
+        query 必須編碼:未編碼時 `&`/`#` 會被當成 URL 語法,呼叫端即可注入額外
+        query 參數或截斷 URL(CWE-116/CWE-74)。組好的 URL 仍須過 catalog 白名單。
+        """
+        search_url = (
+            f"{source.official_url.rstrip('/')}"
+            f"?{urlencode({'q': query}, quote_via=quote)}"
+        )
+        self._url_policy.validate(search_url)
+        return search_url
 
     async def browse(
         self, source: EducationSource, request: BrowseRequest
@@ -50,7 +70,7 @@ class HeadlessAdapter:
         # Playwright import 延遲至實際呼叫，避免啟動成本
         from playwright.async_api import async_playwright  # type: ignore[import]
 
-        search_url = f"{source.official_url.rstrip('/')}?q={request.query}"
+        search_url = self.build_search_url(source, request.query)
         log.warning("headless browse: GET %s", search_url)
 
         async with async_playwright() as p:

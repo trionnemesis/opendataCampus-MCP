@@ -20,7 +20,10 @@ from opendata_campus_mcp.contracts import (
     DiscoveryRequest,
     EducationSource,
 )
+from opendata_campus_mcp.adapters.safe_http import safe_get
+from opendata_campus_mcp.contracts import PolicyViolationError
 from opendata_campus_mcp.domain.browser_policy import BrowserPolicy
+from opendata_campus_mcp.domain.url_policy import PublicEducationUrlPolicy
 
 log = logging.getLogger(__name__)
 
@@ -37,10 +40,14 @@ class TwCampusDirectoryAdapter:
 
     def __init__(self, policy: BrowserPolicy) -> None:
         self._policy = policy
+        # 目錄入口固定為 twcampus.org;redirect 只准留在同一網域,
+        # 不套用 catalog 全域白名單(目錄站沒有跨站導向的正當理由)。
+        self._url_policy = PublicEducationUrlPolicy([_TWCAMPUS_DOMAIN])
         self._client = httpx.AsyncClient(
             headers={"User-Agent": _USER_AGENT},
             timeout=15.0,
-            follow_redirects=True,
+            # redirect 交給 safe_get 逐跳驗證,不讓 httpx 自動跟隨(SSRF)
+            follow_redirects=False,
         )
 
     async def discover(self, request: DiscoveryRequest) -> list[EducationSource]:
@@ -52,10 +59,18 @@ class TwCampusDirectoryAdapter:
         self._policy.check_page_limit(pages_used=0)  # 首頁 = page 1/2
 
         try:
-            resp = await self._client.get(_TWCAMPUS_URL)
+            resp = await safe_get(
+                self._client,
+                _TWCAMPUS_URL,
+                url_policy=self._url_policy,
+            )
             resp.raise_for_status()
         except httpx.HTTPError as exc:
             log.warning("TWCampus fetch failed: %s", exc)
+            return []
+        except PolicyViolationError as exc:
+            # 目錄站導向站外/回應過大 → 與抓取失敗同樣降級至本地快取
+            log.warning("TWCampus fetch rejected by policy: %s", exc)
             return []
 
         soup = BeautifulSoup(resp.text, "html.parser")
