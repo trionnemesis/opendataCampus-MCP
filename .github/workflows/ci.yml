@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# 最小權限:三個 job 都只需讀取原始碼。未指定時 GITHUB_TOKEN 會沿用 repo
+# 的預設權限(可能含 write),對 PR 觸發的 workflow 是不必要的曝險。
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -27,3 +32,45 @@ jobs:
       # 僅跑離線單元測試；live 抓取（integration_e2e / smoke_sources）需連外網，不進 CI gate
       - name: Run unit tests
         run: pytest tests/ -v
+
+  sast:
+    name: bandit (SAST)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install bandit
+        run: python -m pip install "bandit>=1.7"
+
+      # -ll = 只讓 Medium 以上失敗;Low 噪音(assert 等)仍列出供人工檢視
+      - name: Run bandit
+        run: python -m bandit -r src scripts -ll
+
+  audit:
+    name: pip-audit (dependency vulnerabilities)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # pip / setuptools 是 venv bootstrap 套件,不是本專案的相依,但 pip-audit
+      # 會一併稽核已安裝的版本樹。先升到無已知漏洞的版本,讓 job 的紅燈只代表
+      # 「本專案的相依有漏洞」,不會被 runner 預裝版本的雜訊淹沒。
+      - name: Upgrade pip and setuptools
+        run: python -m pip install --upgrade pip "setuptools>=83.0.0"
+
+      # 本專案無 lockfile,故稽核「實際解析安裝」的版本樹,與執行環境一致
+      - name: Install package with dev extras
+        run: python -m pip install -e ".[dev]"
+
+      - name: Run pip-audit
+        run: python -m pip_audit --progress-spinner off --skip-editable
