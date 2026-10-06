@@ -18,6 +18,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from opendata_campus_mcp.adapters._http import build_ssl_context
+from opendata_campus_mcp.adapters.safe_http import bounded_get
 from opendata_campus_mcp.contracts import (
     ExamQuestionResult,
     ExamSearchRequest,
@@ -97,7 +98,8 @@ class CeecExamAdapter:
     async def _fetch(self, url: str) -> str:
         log.debug("ceec_exam: GET %s", url)
         try:
-            resp = await self._client.get(url)
+            # bounded_get:回應大小上限 + 文字型別白名單(CWE-400)
+            resp = await bounded_get(self._client, url)
         except httpx.TransportError as exc:
             raise SourceUnavailableError("CEEC 大考中心", url, str(exc))
         if resp.status_code in (401, 403):
