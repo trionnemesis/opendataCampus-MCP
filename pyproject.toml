@@ -12,7 +12,10 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
 ]
 dependencies = [
-    "fastmcp>=0.2.0",
+    # >=3.2.0:低於此版本的 fastmcp 受 PYSEC-2026-2475 / PYSEC-2026-2476 影響
+    # (更低的 2.x 另有 PYSEC-2026-1364/1365/2474)。與 g0VMCP、
+    # healthcare-opendata-mcp 的下限一致。
+    "fastmcp>=3.2.0",
     "httpx>=0.27",
     "beautifulsoup4>=4.12",
     # 台灣政府教育平台憑證部分缺 Subject Key Identifier，改用 OS 系統信任庫驗證

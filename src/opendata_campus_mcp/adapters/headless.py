@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import warnings
+from urllib.parse import quote
 
 from opendata_campus_mcp.contracts import (
     AccessStrategy,
@@ -50,7 +51,7 @@ class HeadlessAdapter:
         # Playwright import 延遲至實際呼叫，避免啟動成本
         from playwright.async_api import async_playwright  # type: ignore[import]
 
-        search_url = f"{source.official_url.rstrip('/')}?q={request.query}"
+        search_url = _build_search_url(source.official_url, request.query)
         log.warning("headless browse: GET %s", search_url)
 
         async with async_playwright() as p:
@@ -83,3 +84,16 @@ class HeadlessAdapter:
             )
             for item in raw[: request.max_results]
         ]
+
+
+def _build_search_url(official_url: str, query: str) -> str:
+    """把 query 當資料而非 URL 語法接上 ?q=。
+
+    未編碼時 query 裡的 `&`、`#`、`?` 會被瀏覽器當作 URL 結構解讀:`&` 可
+    多塞查詢參數、`#` 可把後半段切成 fragment 而改變實際請求的目標路徑,
+    等於讓呼叫端輸入控制 URL 結構(CWE-74 參數注入)。同 package 的
+    web_search._build_search_url 原本就以 quote(..., safe="") 處理,此處對齊。
+    """
+    base = official_url.rstrip("/")
+    sep = "&" if "?" in base else "?"
+    return f"{base}{sep}q={quote(query, safe='')}"
