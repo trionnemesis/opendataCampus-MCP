@@ -52,10 +52,13 @@ class EduMarketApiAdapter:
         self._api_key = api_key or os.environ.get("EDUMARKET_API_KEY")
         # read 無 by-id 詳情端點,委派給 HTML reader
         self._html_reader = html_reader
+        # follow_redirects=False:API key 是 query 參數,跟隨跳轉會把帶 key 的
+        # URL 原樣送往 Location 指向的主機(CWE-200)。官方 API 正常回 200,
+        # 跳轉一律視為異常來源,不追。WebSearchAdapter 亦採此設定。
         self._client = httpx.AsyncClient(
             headers={"User-Agent": _USER_AGENT},
             timeout=_TIMEOUT,
-            follow_redirects=True,
+            follow_redirects=False,
             verify=build_ssl_context(),
         )
 
@@ -68,18 +71,28 @@ class EduMarketApiAdapter:
                 source.name, source.official_url, "EDUMARKET_API_KEY not configured"
             )
 
-        # keyword 是 path 參數（中文需 encode）；key/page/rows 為 query
+        # keyword 是 path 參數（中文需 encode）；key/page/rows 為 query。
+        # key 交由 httpx params= 編碼,不手動內插進 URL 字串:含 & / # / 空白
+        # 的 key 若直接內插會切斷 query 或截斷 URL,且字串化的 URL 容易被
+        # 連帶寫進 log 或例外訊息(CWE-532)。
         kw = quote(request.query, safe="")
-        url = (
-            f"{_BASE}/v2/search/edumarket/{kw}"
-            f"?key={self._api_key}&page=1&rows={request.max_results}"
-        )
+        url = f"{_BASE}/v2/search/edumarket/{kw}"
+        params = {"key": self._api_key, "page": 1, "rows": request.max_results}
         log.debug("edumarket browse: GET /v2/search/edumarket/%s", kw)
 
         try:
-            resp = await self._client.get(url)
+            resp = await self._client.get(url, params=params)
         except httpx.TransportError as exc:
             raise SourceUnavailableError(source.name, source.official_url, str(exc))
+
+        # follow_redirects=False 下 3xx 會原樣回來。官方 API 正常回 200,
+        # 跳轉代表端點異動或被導向第三方,視為來源不可用(不追、不洩 key)。
+        if 300 <= resp.status_code < 400:
+            raise SourceUnavailableError(
+                source.name,
+                source.official_url,
+                f"unexpected redirect (HTTP {resp.status_code})",
+            )
 
         if resp.status_code in (401, 403):
             raise LoginRequiredError(
