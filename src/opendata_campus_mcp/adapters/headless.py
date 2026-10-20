@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import warnings
+from urllib.parse import quote
 
 from opendata_campus_mcp.contracts import (
     AccessStrategy,
@@ -50,7 +51,13 @@ class HeadlessAdapter:
         # Playwright import 延遲至實際呼叫，避免啟動成本
         from playwright.async_api import async_playwright  # type: ignore[import]
 
-        search_url = f"{source.official_url.rstrip('/')}?q={request.query}"
+        # query 必須 percent-encode 後才進 URL:未編碼時 query 內的 & / # 會
+        # 被解讀為額外參數或 fragment,夾帶呼叫端未預期的參數進官方平台
+        # (CWE-116 輸出編碼不足)。WebSearchAdapter / EduMarketApiAdapter
+        # 皆以 quote(..., safe="") 處理,此處對齊。
+        search_url = (
+            f"{source.official_url.rstrip('/')}?q={quote(request.query, safe='')}"
+        )
         log.warning("headless browse: GET %s", search_url)
 
         async with async_playwright() as p:
