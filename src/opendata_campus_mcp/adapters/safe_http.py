@@ -33,6 +33,9 @@ _ALLOWED_CONTENT_TYPES = frozenset(
 
 
 def _check_content_type(response: httpx.Response, url: str) -> None:
+    # 呼叫端先依 4xx/5xx 狀態分類錯誤,不解析其 body;大小上限仍由 _read_capped 執行。
+    if response.is_error:
+        return
     raw = response.headers.get("Content-Type", "")
     media_type = raw.split(";", 1)[0].strip().lower()
     if media_type and media_type not in _ALLOWED_CONTENT_TYPES:
