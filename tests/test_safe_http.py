@@ -85,7 +85,8 @@ async def test_body_exactly_at_limit_is_allowed(monkeypatch) -> None:
 
 @pytest.mark.parametrize(
     "media_type",
-    ["image/png", "application/octet-stream", "application/pdf", "video/mp4"],
+    ["image/png", "application/octet-stream", "application/pdf", "video/mp4",
+     "application/json"],
 )
 async def test_non_text_content_type_is_rejected(media_type: str) -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
@@ -160,6 +161,53 @@ async def test_error_status_body_is_still_returned() -> None:
 
     resp = await _get(handler)
     assert resp.status_code == 403
+
+
+@pytest.mark.parametrize("status_code", [403, 503])
+@pytest.mark.parametrize("scenario", ["within_limit", "declared_limit", "stream_limit"])
+async def test_json_error_stream_is_bounded_and_closed(
+    monkeypatch, status_code: int, scenario: str
+) -> None:
+    monkeypatch.setattr(safe_http, "MAX_RESPONSE_BYTES", 4)
+
+    class TrackedStream(httpx.AsyncByteStream):
+        chunks_read = 0
+        closed = False
+
+        async def __aiter__(self):
+            chunks = [b"{}"] if scenario == "within_limit" else [b"aaaa", b"b", b"unread"]
+            for chunk in chunks:
+                self.chunks_read += 1
+                yield chunk
+
+        async def aclose(self):
+            self.closed = True
+
+    stream = TrackedStream()
+    headers = {"Content-Type": "application/json"}
+    if scenario == "declared_limit":
+        headers["Content-Length"] = "5"
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(status_code, headers=headers, stream=stream)
+        )
+    ) as client:
+        url_policy, browser_policy = _policies()
+        if scenario == "within_limit":
+            response = await safe_get(
+                client, _URL, url_policy=url_policy, browser_policy=browser_policy
+            )
+            assert response.status_code == status_code
+            assert response.json() == {}
+            assert stream.chunks_read == 1
+        else:
+            with pytest.raises(PolicyViolationError, match="exceeds"):
+                await safe_get(
+                    client, _URL, url_policy=url_policy, browser_policy=browser_policy
+                )
+            assert stream.chunks_read == (0 if scenario == "declared_limit" else 2)
+        assert stream.closed
 
 
 # ── 與既有護欄並存 ──────────────────────────────────────────────────────────
