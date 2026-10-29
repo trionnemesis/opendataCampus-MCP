@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 import httpx
 from bs4 import BeautifulSoup
 
+from opendata_campus_mcp.adapters.safe_http import bounded_get
 from opendata_campus_mcp.contracts import (
     AccessStrategy,
     DiscoveryRequest,
@@ -52,7 +53,8 @@ class TwCampusDirectoryAdapter:
         self._policy.check_page_limit(pages_used=0)  # 首頁 = page 1/2
 
         try:
-            resp = await self._client.get(_TWCAMPUS_URL)
+            # bounded_get:回應大小上限 + 文字型別白名單(CWE-400)
+            resp = await bounded_get(self._client, _TWCAMPUS_URL)
             resp.raise_for_status()
         except httpx.HTTPError as exc:
             log.warning("TWCampus fetch failed: %s", exc)

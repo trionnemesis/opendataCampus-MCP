@@ -21,6 +21,7 @@ from typing import Any
 import httpx
 
 from opendata_campus_mcp.adapters._http import build_ssl_context
+from opendata_campus_mcp.adapters.safe_http import bounded_get
 from opendata_campus_mcp.contracts import (
     AccessStrategy,
     BrowseRequest,
@@ -82,7 +83,9 @@ class OpenDataApiAdapter:
         log.debug("opendata read: GET %s", api_url)
 
         try:
-            resp = await self._client.get(api_url)
+            # bounded_get:回應大小上限(CWE-400)。固定端點的 JSON API,
+            # 上游實際 Content-Type 未經本機驗證,故不加型別白名單。
+            resp = await bounded_get(self._client, api_url, allowed_content_types=None)
         except httpx.TransportError as exc:
             raise SourceUnavailableError("政府資料開放平臺", url, str(exc))
         if resp.status_code >= 400:

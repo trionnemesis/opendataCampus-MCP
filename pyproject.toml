@@ -12,7 +12,12 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
 ]
 dependencies = [
-    "fastmcp>=0.2.0",
+    # >=3.2.0:低於此版本的 fastmcp 受 PYSEC-2026-2475 / PYSEC-2026-2476 影響
+    # (CVE-2026-32871,OpenAPI provider 的 buildurl() 未轉義 path 參數 →
+    #  SSRF / path traversal,CVSS 9.8;另含 OAuth confused-deputy 修正)。
+    # 本專案不走 OpenAPI-from-spec 也不用 OAuth provider,目前無可達路徑,
+    # 但 floor 不應允許全新環境裝進已知有漏洞的版本。兩個姊妹專案同此下限。
+    "fastmcp>=3.2.0",
     "httpx>=0.27",
     "beautifulsoup4>=4.12",
     # 台灣政府教育平台憑證部分缺 Subject Key Identifier，改用 OS 系統信任庫驗證
@@ -24,6 +29,9 @@ headless = ["playwright>=1.44"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    # CI 的 SAST / SCA gate(見 .github/workflows/ci.yml)
+    "bandit>=1.7",
+    "pip-audit>=2.7",
 ]
 
 [project.scripts]
