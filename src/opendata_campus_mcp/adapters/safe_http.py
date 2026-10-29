@@ -1,4 +1,4 @@
-"""Redirect-aware HTTP requests with URL, size and request-budget enforcement."""
+"""Redirect-aware HTTP requests with URL, budget, size and content-type limits."""
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -12,99 +12,70 @@ from opendata_campus_mcp.domain.url_policy import PublicEducationUrlPolicy
 
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 
-# 單一回應 body 上限(CWE-400 / CWE-770)。
-#
-# 本專案抓的都是 HTML 搜尋頁、資源頁與 JSON 信封,正常都在數百 KB 以內。
-# 無上限時 resp.text / resp.json() 會把整份 body 讀進記憶體:
-# read_education_resource 接受任何位於 allowlist host 下的 URL,
-# 其中包含該站台上的大型 PDF / ZIP / 影片 —— 呼叫端(LLM)只要指向其中一個
-# 就能讓 server 配置數百 MB 記憶體,且不需要任何權限。
-#
-# 以 stream + aiter_bytes 逐塊累計,超限立即中止連線,不先把整份內容收下來。
-MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+# 回應讀取上限。browse/read 只解析教育資源 HTML 頁(實測數十 KB ~ 數百 KB),
+# 5MB 遠高於任何正常頁面。無上限時 httpx 會把整份 body 讀進記憶體再交給
+# BeautifulSoup 解析 —— 被指向大型檔案時單次工具呼叫即可耗盡記憶體
+# (CWE-400);摘要截斷發生在解析「之後」,救不了下載與解析階段。
+MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 
-# 只接受可解析成文字的回應。adapter 下游一律做 HTML/JSON 解析,
-# 二進位檔(PDF/ZIP/影片)無論大小都不是有效輸入,在讀 body 前就拒絕,
-# 比先下載 16 MiB 再發現解析不了便宜得多。Content-Type 缺漏時不阻擋
-# (部分政府站台不送此 header),此時仍有大小上限兜底。
-ALLOWED_CONTENT_TYPES: tuple[str, ...] = (
-    "text/html",
-    "text/plain",
-    "text/xml",
-    "application/xhtml+xml",
-    "application/xml",
-    "application/json",
+# safe_get 服務的是 HTML 解析路徑(BeautifulSoup)。明確宣告非 HTML/文字型別
+# 不予下載,避免把二進位大檔(影音、壓縮檔、PDF)拉進解析器。
+# 刻意「只在 Content-Type 存在且不在白名單時」拒絕:部分政府教育站台不回
+# Content-Type,一律嚴拒會打斷既有可用來源;缺標頭的大檔仍由上面的大小上限兜底。
+_ALLOWED_CONTENT_TYPES = frozenset(
+    {
+        "text/html",
+        "application/xhtml+xml",
+        "text/plain",
+        "text/xml",
+        "application/xml",
+    }
 )
 
 
-class ResponseTooLargeError(PolicyViolationError):
-    """回應 body 超出 MAX_RESPONSE_BYTES,或型別不是可解析的文字。
+ALLOWED_CONTENT_TYPES = (*sorted(_ALLOWED_CONTENT_TYPES), "application/json")
 
-    繼承 PolicyViolationError —— MCP 工具層已針對該型別回結構化錯誤,
-    不需要新增例外處理分支。
-    """
+
+class ResponseTooLargeError(PolicyViolationError):
+    """Response exceeds its byte budget or permitted media types."""
 
 
 def _check_content_type(
-    response: httpx.Response, url: str, allowed: Iterable[str] | None
+    response: httpx.Response, url: str,
+    allowed: Iterable[str] | None = _ALLOWED_CONTENT_TYPES,
 ) -> None:
-    if allowed is None:
-        return  # 固定端點的 JSON API:上游實際 header 未經本機驗證,不設型別白名單
-    # 只檢查 2xx:錯誤頁與轉址的 body 不會被下游解析
-    if not (200 <= response.status_code < 300):
+    # 呼叫端先依 4xx/5xx 狀態分類錯誤,不解析其 body;大小上限仍由 _read_capped 執行。
+    if response.is_error or allowed is None:
         return
-    raw = response.headers.get("Content-Type")
-    if not raw:
-        return  # header 缺漏不阻擋,交給大小上限兜底
+    raw = response.headers.get("Content-Type", "")
     media_type = raw.split(";", 1)[0].strip().lower()
-    if media_type and media_type not in tuple(allowed):
+    if media_type and media_type not in allowed:
         raise ResponseTooLargeError(
-            f"outbound response content-type is not readable text: {media_type}"
+            f"outbound response content type is not allowed: {media_type}"
         )
 
 
-async def bounded_get(
-    client: httpx.AsyncClient,
-    url: str,
-    *,
-    max_bytes: int = MAX_RESPONSE_BYTES,
-    allowed_content_types: Iterable[str] | None = ALLOWED_CONTENT_TYPES,
-    follow_redirects: bool | None = None,
-) -> httpx.Response:
-    """GET *url*, refusing bodies above *max_bytes* before they are buffered.
+async def _read_capped(response: httpx.Response, url: str, max_bytes: int) -> bytes:
+    """串流讀取 body,累計超過上限即中止 — 不把超量內容讀完才檢查。
 
-    Returns a fully-read ``httpx.Response`` so callers keep using ``.text`` /
-    ``.json()`` / ``.status_code`` unchanged. ``follow_redirects=None`` keeps
-    whatever the client was configured with; ``allowed_content_types=None``
-    disables the media-type allowlist and relies on *max_bytes* alone.
+    Content-Length 若已宣告超量則直接拒絕,連下載都不開始。
     """
-    request = client.build_request("GET", url)
-    redirects = (
-        client.follow_redirects if follow_redirects is None else follow_redirects
-    )
-    response = await client.send(request, stream=True, follow_redirects=redirects)
-    try:
-        _check_content_type(response, url, allowed_content_types)
-        chunks: list[bytes] = []
-        total = 0
-        async for chunk in response.aiter_bytes():
-            total += len(chunk)
-            if total > max_bytes:
-                raise ResponseTooLargeError(
-                    f"outbound response body exceeds {max_bytes} bytes"
-                )
-            chunks.append(chunk)
-        body = b"".join(chunks)
-    finally:
-        await response.aclose()
+    declared = response.headers.get("Content-Length")
+    if declared and declared.isdigit() and int(declared) > max_bytes:
+        raise ResponseTooLargeError(
+            f"outbound response exceeds {max_bytes} bytes (declared)"
+        )
 
-    return httpx.Response(
-        status_code=response.status_code,
-        headers=response.headers,
-        content=body,
-        request=response.request,
-        extensions=response.extensions,
-    )
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in response.aiter_bytes():
+        total += len(chunk)
+        if total > max_bytes:
+            raise ResponseTooLargeError(
+                f"outbound response exceeds {max_bytes} bytes"
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 async def safe_get(
@@ -113,9 +84,15 @@ async def safe_get(
     *,
     url_policy: PublicEducationUrlPolicy,
     browser_policy: BrowserPolicy,
-    max_bytes: int = MAX_RESPONSE_BYTES,
+    max_bytes: int | None = None,
 ) -> httpx.Response:
-    """GET an allowed URL, validating every redirect before it is requested."""
+    """GET an allowed URL, validating every redirect before it is requested.
+
+    回應以串流讀取並受 MAX_RESPONSE_BYTES 與 Content-Type 白名單約束;
+    回傳的 Response 仍為已載入 body 的一般 httpx.Response(`.text` / `.json()`
+    行為不變),呼叫端無需改動。
+    """
+    max_bytes = MAX_RESPONSE_BYTES if max_bytes is None else max_bytes
     current_url = url
     pages_used = 0
 
@@ -124,12 +101,77 @@ async def safe_get(
         browser_policy.check_page_limit(pages_used)
         host = urlparse(current_url).hostname or ""
         browser_policy.check_rate_limit(host.lower())
-        response = await bounded_get(
-            client, current_url, max_bytes=max_bytes, follow_redirects=False
-        )
+
+        request = client.build_request("GET", current_url)
+        response = await client.send(request, follow_redirects=False, stream=True)
         pages_used += 1
 
         location = response.headers.get("Location")
-        if response.status_code not in _REDIRECT_STATUSES or not location:
-            return response
-        current_url = urljoin(current_url, location)
+        if response.status_code in _REDIRECT_STATUSES and location:
+            await response.aclose()
+            current_url = urljoin(current_url, location)
+            continue
+
+        try:
+            _check_content_type(response, current_url)
+            body = await _read_capped(response, current_url, max_bytes)
+        finally:
+            await response.aclose()
+
+        # aiter_bytes 回傳的是「已解碼」的位元組,故重建時移除 transfer 相關
+        # 標頭,避免 httpx 對同一份 body 二次解碼或回報錯誤長度。
+        headers = [
+            (k, v)
+            for k, v in response.headers.multi_items()
+            if k.lower() not in ("content-encoding", "content-length")
+        ]
+        return httpx.Response(
+            status_code=response.status_code,
+            headers=headers,
+            content=body,
+            request=request,
+        )
+
+
+
+async def bounded_get(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    max_bytes: int | None = None,
+    allowed_content_types: Iterable[str] | None = ALLOWED_CONTENT_TYPES,
+    follow_redirects: bool | None = None,
+) -> httpx.Response:
+    """Read a fixed-endpoint response with the same decoded-byte budget."""
+    max_bytes = MAX_RESPONSE_BYTES if max_bytes is None else max_bytes
+    request = client.build_request("GET", url)
+    redirects = client.follow_redirects if follow_redirects is None else follow_redirects
+    # httpx auto-follow eagerly buffers intermediate bodies, bypassing our cap.
+    # Follow its prepared next_request while closing redirect bodies unread.
+    redirects_used = 0
+    while True:
+        response = await client.send(request, stream=True, follow_redirects=False)
+        if not redirects or response.next_request is None:
+            break
+        next_request = response.next_request
+        await response.aclose()
+        redirects_used += 1
+        if redirects_used > client.max_redirects:
+            raise httpx.TooManyRedirects("Exceeded maximum allowed redirects.", request=request)
+        request = next_request
+    try:
+        _check_content_type(response, url, allowed_content_types)
+        body = await _read_capped(response, url, max_bytes)
+    finally:
+        await response.aclose()
+    headers = [
+        (k, v) for k, v in response.headers.multi_items()
+        if k.lower() not in ("content-encoding", "content-length")
+    ]
+    return httpx.Response(
+        status_code=response.status_code,
+        headers=headers,
+        content=body,
+        request=response.request,
+        extensions=response.extensions,
+    )

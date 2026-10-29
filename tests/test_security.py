@@ -85,7 +85,7 @@ class TestResponseSizeLimit:
         await client.aclose()
 
     def test_default_cap_is_set_and_bounded(self) -> None:
-        assert 0 < MAX_RESPONSE_BYTES <= 64 * 1024 * 1024
+        assert MAX_RESPONSE_BYTES == 5 * 1024 * 1024
 
     async def test_error_is_a_policy_violation(self) -> None:
         """ResponseTooLargeError 必須是 PolicyViolationError 的子類 ——
@@ -108,7 +108,7 @@ class TestContentTypeAllowlist:
                 200, content=b"binary", headers={"Content-Type": media_type}
             )
         )
-        with pytest.raises(ResponseTooLargeError, match="content-type"):
+        with pytest.raises(ResponseTooLargeError, match="content type"):
             await bounded_get(client, f"https://{_HOST}/file")
         await client.aclose()
 
@@ -293,3 +293,4 @@ class TestCiSecurityGates:
             if "${{" in line and ("inputs." in line or "github.event" in line)
         ]
         assert offenders == [], offenders
+

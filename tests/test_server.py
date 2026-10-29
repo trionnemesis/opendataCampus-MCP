@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from typing import Any
 
+import httpx
 import pytest
 
 from opendata_campus_mcp.contracts import AccessStrategy, RateLimitError
@@ -123,3 +124,42 @@ async def test_build_server_closes_runtime_on_lifespan_shutdown(
         close_runtime.assert_not_awaited()
 
     close_runtime.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments"),
+    [
+        ("browse_education_source", {"source": "因材網", "query": "數學"}),
+        ("read_education_resource", {"url": "https://adl.edu.tw/resource/1"}),
+    ],
+)
+@pytest.mark.parametrize(
+    ("status_code", "expected_error"),
+    [(401, "login_required"), (403, "login_required"),
+     (404, "source_unavailable"), (503, "source_unavailable")],
+)
+async def test_web_tools_preserve_json_http_error_classification(
+    monkeypatch: pytest.MonkeyPatch,
+    tool_name: str,
+    arguments: dict[str, Any],
+    status_code: int,
+    expected_error: str,
+) -> None:
+    """JSON error bodies must reach the existing status-based MCP error mapping."""
+    monkeypatch.delenv("EDUMARKET_API_KEY", raising=False)
+    real_web_adapter = runtime_module.WebSearchAdapter
+
+    def build_web_adapter(**kwargs: Any) -> Any:
+        client = httpx.AsyncClient(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(status_code, json={"detail": "denied"})
+            )
+        )
+        return real_web_adapter(client=client, **kwargs)
+
+    monkeypatch.setattr(runtime_module, "WebSearchAdapter", build_web_adapter)
+    mcp = server_module.build_server()
+    async with mcp._lifespan_manager():
+        result = await mcp.call_tool(tool_name, arguments)
+
+    assert result.structured_content["error"] == expected_error

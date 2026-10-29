@@ -6,8 +6,8 @@ on:
   pull_request:
     branches: [main]
 
-# 最小權限:三個 job 都只需讀取原始碼。未指定時 GITHUB_TOKEN 會沿用 repo
-# 的預設權限(可能含 write),對 PR 觸發的 workflow 是不必要的曝險。
+# 最小權限:三個 job 都只需讀取原始碼。未宣告時 GITHUB_TOKEN 會沿用
+# repository 預設(可能含 write),對 PR 觸發的工作流程是不必要的授權面。
 permissions:
   contents: read
 
@@ -19,10 +19,12 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      # 第三方 action 一律釘 commit SHA:浮動 tag(@v4)可被重新指向,
+      # 等同把 CI 執行權交給上游 tag 的可變性(供應鏈風險)。
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -37,10 +39,10 @@ jobs:
     name: bandit (SAST)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
 
@@ -48,6 +50,7 @@ jobs:
         run: python -m pip install "bandit>=1.7"
 
       # -ll = 只讓 Medium 以上失敗;Low 噪音(assert 等)仍列出供人工檢視
+      # scripts/ 一併掃描:維運腳本同樣碰網路
       - name: Run bandit
         run: python -m bandit -r src scripts -ll
 
@@ -55,22 +58,23 @@ jobs:
     name: pip-audit (dependency vulnerabilities)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
+      # 3.12 的 ensurepip 不再夾帶 setuptools,避免稽核到與本專案無關的 bootstrap 套件
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
-      # pip / setuptools 是 venv bootstrap 套件,不是本專案的相依,但 pip-audit
-      # 會一併稽核已安裝的版本樹。先升到無已知漏洞的版本,讓 job 的紅燈只代表
-      # 「本專案的相依有漏洞」,不會被 runner 預裝版本的雜訊淹沒。
-      - name: Upgrade pip and setuptools
-        run: python -m pip install --upgrade pip "setuptools>=83.0.0"
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
 
-      # 本專案無 lockfile,故稽核「實際解析安裝」的版本樹,與執行環境一致
+      # 無 lockfile,故稽核「實際解析安裝」的版本樹,與執行環境一致
       - name: Install package with dev extras
         run: python -m pip install -e ".[dev]"
+
+      - name: Install pip-audit
+        run: python -m pip install pip-audit
 
       - name: Run pip-audit
         run: python -m pip_audit --progress-spinner off --skip-editable
