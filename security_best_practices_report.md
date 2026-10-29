@@ -67,6 +67,10 @@ Recommendation:
 
 ### SEC-4 Medium: response body size and content type are not bounded before parsing
 
+Status (2026-10-28): **Remediated for the `safe_get` boundary.** `safe_http.safe_get` now streams every response, rejects a declared `Content-Length` over `MAX_RESPONSE_BYTES` (5MB) before reading, aborts mid-stream when the accumulated body exceeds that budget, and rejects non-error responses whose `Content-Type` is present but outside the HTML/text allowlist. HTTP 4xx/5xx responses remain subject to the size limit and stream cleanup but bypass the media-type check so callers preserve their existing login-required/source-unavailable classification without parsing the error body. A missing `Content-Type` is still accepted on purpose (some education platforms omit it); the size budget is the backstop for that case. The returned object is still a body-loaded `httpx.Response`, so `.text` / `.json()` behavior is unchanged for callers. Regression coverage: `tests/test_safe_http.py` and `tests/test_server.py`.
+
+Not covered by this change: `EduMarketApiAdapter`, `OpenDataApiAdapter`, `CeecExamAdapter` and `TwCampusAdapter` still issue their own `httpx` GETs outside `safe_get` and remain unbounded — see the operational-hardening phase.
+
 Impact: a caller can cause the server to download and parse unexpectedly large or non-HTML responses, creating memory/latency risk even though returned summaries are capped.
 
 Evidence:

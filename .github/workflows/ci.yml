@@ -6,8 +6,8 @@ on:
   pull_request:
     branches: [main]
 
-# 最小權限:本 workflow 只需讀 repo。未宣告時 GITHUB_TOKEN 會沿用
-# repo 預設(可能是 read/write),被注入的第三方 action 即可寫入本倉庫。
+# 最小權限:三個 job 都只需讀取原始碼。未宣告時 GITHUB_TOKEN 會沿用
+# repository 預設(可能含 write),對 PR 觸發的工作流程是不必要的授權面。
 permissions:
   contents: read
 
@@ -19,8 +19,8 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      # 第三方 action 一律釘 commit SHA:tag 可被重新指向,等於可變的
-      # 第三方程式碼在 CI 內以本 job 的權限執行(供應鏈風險 CWE-1357)。
+      # 第三方 action 一律釘 commit SHA:浮動 tag(@v4)可被重新指向,
+      # 等同把 CI 執行權交給上游 tag 的可變性(供應鏈風險)。
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Python ${{ matrix.python-version }}
@@ -49,8 +49,8 @@ jobs:
       - name: Install bandit
         run: python -m pip install "bandit>=1.7"
 
-      # -ll = 只讓 Medium 以上失敗;Low 噪音(assert 等)仍列出供人工檢視。
-      # scripts/ 一併掃描:維運腳本同樣碰網路。
+      # -ll = 只讓 Medium 以上失敗;Low 噪音(assert 等)仍列出供人工檢視
+      # scripts/ 一併掃描:維運腳本同樣碰網路
       - name: Run bandit
         run: python -m bandit -r src scripts -ll
 
@@ -73,7 +73,8 @@ jobs:
       - name: Install package with dev extras
         run: python -m pip install -e ".[dev]"
 
+      - name: Install pip-audit
+        run: python -m pip install pip-audit
+
       - name: Run pip-audit
-        run: |
-          python -m pip install "pip-audit>=2.7"
-          python -m pip_audit --progress-spinner off --skip-editable
+        run: python -m pip_audit --progress-spinner off --skip-editable

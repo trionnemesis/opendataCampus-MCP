@@ -235,3 +235,52 @@ async def test_api_key_never_appears_in_debug_log(caplog):
         await _adapter_with(handler, api_key="s3cret_key").browse(_SOURCE, _REQ)
 
     assert "s3cret_key" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_encoded_key_and_bounded_gzip_response_work_together():
+    import gzip
+    import json
+
+    key = "k&page=99#x"
+    payload = json.dumps(_envelope([_RESOURCE])).encode()
+
+    async def body():
+        yield gzip.compress(payload)
+
+    def handler(request):
+        assert request.url.params["key"] == key
+        assert request.url.params["page"] == "1"
+        assert request.url.params["rows"] == str(_REQ.max_results)
+        return httpx.Response(200, content=body(), headers={
+            "Content-Type": "application/json", "Content-Encoding": "gzip",
+        })
+
+    adapter = _adapter_with(handler, api_key=key)
+    try:
+        results = await adapter.browse(_SOURCE, _REQ)
+        assert len(results) == 1
+    finally:
+        await adapter.aclose()
+
+
+@pytest.mark.asyncio
+async def test_redirect_is_not_followed_even_with_injected_redirecting_client():
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(302, headers={"Location": "https://evil.example/collect"})
+
+    adapter = EduMarketApiAdapter(api_key="test-secret")
+    await adapter._client.aclose()
+    adapter._client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), follow_redirects=True
+    )
+    try:
+        with pytest.raises(SourceUnavailableError, match="unexpected redirect"):
+            await adapter.browse(_SOURCE, _REQ)
+        assert len(seen) == 1
+        assert seen[0].url.host == "market.cloud.edu.tw"
+    finally:
+        await adapter.aclose()

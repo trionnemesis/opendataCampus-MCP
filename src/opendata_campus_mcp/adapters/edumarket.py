@@ -20,6 +20,7 @@ from urllib.parse import quote
 import httpx
 
 from opendata_campus_mcp.adapters._http import build_ssl_context
+from opendata_campus_mcp.adapters.safe_http import bounded_get
 from opendata_campus_mcp.contracts import (
     AccessStrategy,
     BrowseAdapter,
@@ -81,7 +82,10 @@ class EduMarketApiAdapter:
         log.debug("edumarket browse: GET /v2/search/edumarket/%s", kw)
 
         try:
-            resp = await self._client.get(url, params=params)
+            resp = await bounded_get(
+                self._client, url, params=params,
+                allowed_content_types=None, follow_redirects=False,
+            )
         except httpx.TransportError as exc:
             raise SourceUnavailableError(source.name, source.official_url, str(exc))
 
