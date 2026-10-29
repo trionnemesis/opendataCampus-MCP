@@ -141,10 +141,11 @@ async def bounded_get(
     max_bytes: int | None = None,
     allowed_content_types: Iterable[str] | None = ALLOWED_CONTENT_TYPES,
     follow_redirects: bool | None = None,
+    params: dict[str, str | int] | None = None,
 ) -> httpx.Response:
     """Read a fixed-endpoint response with the same decoded-byte budget."""
     max_bytes = MAX_RESPONSE_BYTES if max_bytes is None else max_bytes
-    request = client.build_request("GET", url)
+    request = client.build_request("GET", url, params=params)
     redirects = client.follow_redirects if follow_redirects is None else follow_redirects
     # httpx auto-follow eagerly buffers intermediate bodies, bypassing our cap.
     # Follow its prepared next_request while closing redirect bodies unread.

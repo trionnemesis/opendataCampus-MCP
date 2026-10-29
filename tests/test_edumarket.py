@@ -163,3 +163,124 @@ async def test_copyright_not_mapped_to_publisher():
 
     results = await _adapter_with(handler).browse(_SOURCE, _REQ)
     assert results[0].publisher is None
+
+
+# ── 安全回歸:API key 不得隨跳轉外洩(CWE-200 / CWE-598)──────────────────────
+
+
+@pytest.mark.asyncio
+async def test_browse_does_not_follow_redirects_with_key():
+    """3xx 不得被跟隨 —— 否則帶 key 的 URL 會被原樣送往 Location 主機。"""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        if request.url.host == "market.cloud.edu.tw":
+            return httpx.Response(
+                302, headers={"Location": "https://evil.example.com/collect"}
+            )
+        return httpx.Response(200, json=_envelope([_RESOURCE]))
+
+    adapter = EduMarketApiAdapter(api_key="s3cret_key")
+    adapter._client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), follow_redirects=False
+    )
+
+    with pytest.raises(SourceUnavailableError):
+        await adapter.browse(_SOURCE, _REQ)
+
+    # 只打了官方主機一次,evil.example.com 完全沒收到請求
+    assert len(seen) == 1
+    assert "market.cloud.edu.tw" in seen[0]
+    assert not any("evil.example.com" in u for u in seen)
+
+
+@pytest.mark.asyncio
+async def test_production_client_has_redirects_disabled():
+    """預設(非測試注入)client 必須關閉 follow_redirects。"""
+    adapter = EduMarketApiAdapter(api_key="s3cret_key")
+    try:
+        assert adapter._client.follow_redirects is False
+    finally:
+        await adapter.aclose()
+
+
+@pytest.mark.asyncio
+async def test_api_key_is_url_encoded_not_interpolated():
+    """key 含 & / # 時必須被 percent-encode,不得切斷 query 或截斷 URL。"""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=_envelope([_RESOURCE]))
+
+    await _adapter_with(handler, api_key="k&page=99#x").browse(_SOURCE, _REQ)
+
+    req = seen[0]
+    # key 完整送達(httpx 解碼後仍是原字串),且 page 未被攻擊字串覆寫
+    assert req.url.params["key"] == "k&page=99#x"
+    assert req.url.params["page"] == "1"
+    # raw query 中的 & / # 已被編碼,fragment 未被提前切出
+    assert "k%26page%3D99%23x" in str(req.url)
+    assert req.url.fragment == ""
+
+
+@pytest.mark.asyncio
+async def test_api_key_never_appears_in_debug_log(caplog):
+    """log 只記 path 與 keyword,絕不記 key(CWE-532)。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_envelope([_RESOURCE]))
+
+    with caplog.at_level("DEBUG", logger="opendata_campus_mcp.adapters.edumarket"):
+        await _adapter_with(handler, api_key="s3cret_key").browse(_SOURCE, _REQ)
+
+    assert "s3cret_key" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_encoded_key_and_bounded_gzip_response_work_together():
+    import gzip
+    import json
+
+    key = "k&page=99#x"
+    payload = json.dumps(_envelope([_RESOURCE])).encode()
+
+    async def body():
+        yield gzip.compress(payload)
+
+    def handler(request):
+        assert request.url.params["key"] == key
+        assert request.url.params["page"] == "1"
+        assert request.url.params["rows"] == str(_REQ.max_results)
+        return httpx.Response(200, content=body(), headers={
+            "Content-Type": "application/json", "Content-Encoding": "gzip",
+        })
+
+    adapter = _adapter_with(handler, api_key=key)
+    try:
+        results = await adapter.browse(_SOURCE, _REQ)
+        assert len(results) == 1
+    finally:
+        await adapter.aclose()
+
+
+@pytest.mark.asyncio
+async def test_redirect_is_not_followed_even_with_injected_redirecting_client():
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(302, headers={"Location": "https://evil.example/collect"})
+
+    adapter = EduMarketApiAdapter(api_key="test-secret")
+    await adapter._client.aclose()
+    adapter._client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), follow_redirects=True
+    )
+    try:
+        with pytest.raises(SourceUnavailableError, match="unexpected redirect"):
+            await adapter.browse(_SOURCE, _REQ)
+        assert len(seen) == 1
+        assert seen[0].url.host == "market.cloud.edu.tw"
+    finally:
+        await adapter.aclose()
