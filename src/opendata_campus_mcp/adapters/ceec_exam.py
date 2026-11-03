@@ -142,11 +142,18 @@ class CeecExamAdapter:
 
             for a in pdf_links:
                 label = a.get_text(strip=True)
-                file_title = (a.get("title") or label).strip()
+                raw_title = a.get("title")
+                # bs4 多值屬性會回 list;title/href 都不該是,保守收斂成 str
+                file_title = (
+                    raw_title if isinstance(raw_title, str) else label
+                ).strip()
+                raw_href = a.get("href")
+                if not isinstance(raw_href, str):
+                    continue
                 # "/files/file_pool/" 是子字串比對,一個絕對 href
                 # (https://evil.example/files/file_pool/x.pdf)同樣會通過;
                 # 解析後必須確認仍落在 CEEC 網域才回傳(CWE-601)。
-                download_url = _ceec_download_url(a["href"])
+                download_url = _ceec_download_url(raw_href)
                 if not download_url:
                     log.warning("skipped off-site exam href on CEEC listing")
                     continue

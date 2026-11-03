@@ -20,6 +20,7 @@ from opendata_campus_mcp.adapters.safe_http import (
 )
 from bs4 import BeautifulSoup
 
+from opendata_campus_mcp.adapters.ceec_exam import CeecExamAdapter, _ceec_download_url
 from opendata_campus_mcp.adapters.web_search import WebSearchAdapter
 from opendata_campus_mcp.contracts import (
     AccessStrategy,
@@ -27,9 +28,18 @@ from opendata_campus_mcp.contracts import (
     PolicyViolationError,
 )
 from opendata_campus_mcp.domain.browser_policy import BrowserPolicy
-from opendata_campus_mcp.domain.url_policy import PublicEducationUrlPolicy
+from opendata_campus_mcp.domain.url_policy import (
+    PublicEducationUrlPolicy,
+    safe_result_url,
+)
 
 _HOST = "market.cloud.edu.tw"
+
+_SOURCE_FOR_EDU = EducationSource(
+    name="教育大市集",
+    official_url="https://market.cloud.edu.tw",
+    access_strategy=AccessStrategy.OFFICIAL_API,
+)
 
 
 def _client(handler, *, follow_redirects: bool = False) -> httpx.AsyncClient:
@@ -405,3 +415,91 @@ class TestResultUrlSchemeAllowlist:
         )
         out = adapter._extract_fields(soup, self._BASE, ["license"])
         assert out["license"] == "https://creativecommons.org/licenses/by/4.0/"
+
+
+class TestSafeResultUrl:
+    """domain/url_policy.safe_result_url —— 共用的回傳連結 scheme 白名單。
+
+    取自 PR #12(原作者的測試與 src 改動分在不同 commit,cherry-pick src 時
+    沒帶進來,此處補回,否則 cherry-pick 進來的 helper 沒有回歸保護)。
+    """
+
+    @pytest.mark.parametrize(
+        "href",
+        [
+            "javascript:alert(1)",
+            "JavaScript:alert(1)",  # 大小寫混淆
+            "data:text/html,<script>alert(1)</script>",
+            "vbscript:msgbox(1)",
+            "file:///etc/passwd",
+            "",
+        ],
+    )
+    def test_dangerous_scheme_rejected(self, href: str) -> None:
+        assert safe_result_url(href, "https://market.cloud.edu.tw/a") is None
+
+    @pytest.mark.parametrize(
+        ("href", "expected"),
+        [
+            ("/res/1", "https://market.cloud.edu.tw/res/1"),
+            ("res/1", "https://market.cloud.edu.tw/a/res/1"),
+            ("https://adl.edu.tw/x", "https://adl.edu.tw/x"),
+            ("//adl.edu.tw/x", "https://adl.edu.tw/x"),
+        ],
+    )
+    def test_legitimate_href_resolved(self, href: str, expected: str) -> None:
+        assert safe_result_url(href, "https://market.cloud.edu.tw/a/") == expected
+
+
+class TestCeecDownloadUrlHost:
+    """`/files/file_pool/` 是子字串比對,絕對 href 同樣會通過該過濾。
+
+    同樣取自 PR #12。
+    """
+
+    def test_offsite_pdf_href_rejected(self) -> None:
+        assert _ceec_download_url("https://evil.example/files/file_pool/x.pdf") is None
+
+    def test_onsite_pdf_href_accepted(self) -> None:
+        assert (
+            _ceec_download_url("/files/file_pool/x.pdf")
+            == "https://www.ceec.edu.tw/files/file_pool/x.pdf"
+        )
+
+    def test_listing_drops_offsite_row_keeps_onsite(self) -> None:
+        html = (
+            "<table><tr>"
+            "<td>115-02-23</td><td>115學年度學科能力測驗－國綜</td>"
+            '<td><a href="https://evil.example/files/file_pool/bad.pdf">試題</a>'
+            '<a href="/files/file_pool/good.pdf">試題</a></td>'
+            "</tr></table>"
+        )
+        adapter = CeecExamAdapter(BrowserPolicy())
+        rows = adapter._parse_listing(html, "學測", "https://www.ceec.edu.tw/xmfile")
+        assert [r.download_url for r in rows] == [
+            "https://www.ceec.edu.tw/files/file_pool/good.pdf"
+        ]
+
+
+class TestEdumarketResultUrl:
+    """edumarket 的 url 直接來自第三方 API 的 JSON,同樣要過 scheme 白名單。"""
+
+    def test_dangerous_api_url_becomes_empty_string(self) -> None:
+        from opendata_campus_mcp.adapters.edumarket import EduMarketApiAdapter
+
+        adapter = EduMarketApiAdapter(api_key="k")
+        out = adapter._to_search_result(
+            {"title": "t", "url": "javascript:alert(1)", "desc": "d"}, _SOURCE_FOR_EDU
+        )
+        # 維持既有欄位形狀(空字串),不把可執行連結交給 client
+        assert out.url == ""
+
+    def test_normal_api_url_is_kept(self) -> None:
+        from opendata_campus_mcp.adapters.edumarket import EduMarketApiAdapter
+
+        adapter = EduMarketApiAdapter(api_key="k")
+        out = adapter._to_search_result(
+            {"title": "t", "url": "https://market.cloud.edu.tw/r/1", "desc": "d"},
+            _SOURCE_FOR_EDU,
+        )
+        assert out.url == "https://market.cloud.edu.tw/r/1"
