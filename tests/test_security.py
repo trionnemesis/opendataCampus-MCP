@@ -18,7 +18,14 @@ from opendata_campus_mcp.adapters.safe_http import (
     bounded_get,
     safe_get,
 )
-from opendata_campus_mcp.contracts import PolicyViolationError
+from bs4 import BeautifulSoup
+
+from opendata_campus_mcp.adapters.web_search import WebSearchAdapter
+from opendata_campus_mcp.contracts import (
+    AccessStrategy,
+    EducationSource,
+    PolicyViolationError,
+)
 from opendata_campus_mcp.domain.browser_policy import BrowserPolicy
 from opendata_campus_mcp.domain.url_policy import PublicEducationUrlPolicy
 
@@ -294,3 +301,107 @@ class TestCiSecurityGates:
         ]
         assert offenders == [], offenders
 
+
+
+class TestResultUrlSchemeAllowlist:
+    """browse 回傳的 URL 取自上游 HTML 的 href —— 非 http(s) scheme 不得外流。
+
+    urljoin 對 `javascript:` / `data:` / `file:` 這類非相對 scheme 是 no-op,
+    舊的 `href.startswith("http")` 分支因此讓它們原封不動進到
+    SearchResult.url,再經 service.browse_source 回給 MCP 呼叫端
+    (CWE-79 / CWE-601)。
+    """
+
+    _BASE = "https://market.cloud.edu.tw/index.php"
+
+    @staticmethod
+    def _source() -> EducationSource:
+        return EducationSource(
+            name="教育大市集",
+            official_url="https://market.cloud.edu.tw",
+            description="測試用",
+            access_strategy=AccessStrategy.WEB_SEARCH,
+        )
+
+    def _urls_from(self, html: str) -> list[str]:
+        soup = BeautifulSoup(html, "html.parser")
+        adapter = WebSearchAdapter(
+            policy=BrowserPolicy(), url_policy=_policy(), client=_client(lambda r: None)
+        )
+        return [
+            r.url for r in adapter._parse_results(soup, self._source(), max_results=10)
+        ]
+
+    @pytest.mark.parametrize(
+        "href",
+        [
+            "javascript:alert(1)",
+            "JavaScript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "vbscript:msgbox(1)",
+            "file:///etc/passwd",
+            "httpfoo://evil.example/x",  # startswith("http") 放過的偽 scheme
+        ],
+    )
+    def test_dangerous_scheme_is_dropped(self, href):
+        urls = self._urls_from(f'<article><a href="{href}">某個教材標題</a></article>')
+        assert urls == []
+
+    def test_relative_href_still_resolves_against_the_source(self):
+        urls = self._urls_from(
+            '<article><a href="/resource/123">某個教材標題</a></article>'
+        )
+        assert urls == ["https://market.cloud.edu.tw/resource/123"]
+
+    def test_absolute_https_href_is_unchanged(self):
+        urls = self._urls_from(
+            '<article><a href="https://adl.edu.tw/x">某個教材標題</a></article>'
+        )
+        assert urls == ["https://adl.edu.tw/x"]
+
+    def test_plain_http_href_is_kept(self):
+        """政府站台仍有 http 連結;只擋 scheme 類別,不在此處強制 https。"""
+        urls = self._urls_from(
+            '<article><a href="http://cirn.k12ea.gov.tw/x">某個教材標題</a></article>'
+        )
+        assert urls == ["http://cirn.k12ea.gov.tw/x"]
+
+    def test_protocol_relative_href_is_promoted_not_dropped(self):
+        urls = self._urls_from(
+            '<article><a href="//adl.edu.tw/x">某個教材標題</a></article>'
+        )
+        assert urls == ["https://adl.edu.tw/x"]
+
+    def test_one_bad_result_does_not_drop_the_good_ones(self):
+        urls = self._urls_from(
+            '<article><a href="javascript:alert(1)">壞的標題</a></article>'
+            '<article><a href="/good">好的標題</a></article>'
+        )
+        assert urls == ["https://market.cloud.edu.tw/good"]
+
+    @pytest.mark.parametrize(
+        "href", ["javascript:alert(1)", "data:text/html,x", "file:///etc/passwd"]
+    )
+    def test_license_link_scheme_is_also_filtered(self, href):
+        adapter = WebSearchAdapter(
+            policy=BrowserPolicy(), url_policy=_policy(), client=_client(lambda r: None)
+        )
+        soup = BeautifulSoup(
+            f'<html><head><link rel="license" href="{href}"></head></html>',
+            "html.parser",
+        )
+        out = adapter._extract_fields(soup, self._BASE, ["license"])
+        assert out["license"] is None
+
+    def test_legitimate_off_catalog_license_link_is_kept(self):
+        """CC 授權頁不在 source catalog 裡,但是合法輸出 —— 不可被擋掉。"""
+        adapter = WebSearchAdapter(
+            policy=BrowserPolicy(), url_policy=_policy(), client=_client(lambda r: None)
+        )
+        soup = BeautifulSoup(
+            '<html><head><link rel="license"'
+            ' href="https://creativecommons.org/licenses/by/4.0/"></head></html>',
+            "html.parser",
+        )
+        out = adapter._extract_fields(soup, self._BASE, ["license"])
+        assert out["license"] == "https://creativecommons.org/licenses/by/4.0/"

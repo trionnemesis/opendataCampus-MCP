@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup, Tag
@@ -145,9 +145,12 @@ class WebSearchAdapter:
             link = item.find("a", href=True)
             if not link:
                 continue
-            href: str = link["href"]
-            if not href.startswith("http"):
-                href = urljoin(source.official_url, href)
+            raw_href = link.get("href")
+            if not isinstance(raw_href, str):
+                continue  # bs4 多值屬性會回 list;href 不該是,保守跳過
+            href = _safe_result_url(raw_href, source.official_url)
+            if href is None:
+                continue
 
             title = link.get_text(strip=True)
             if not title or len(title) < 2:
@@ -224,7 +227,8 @@ class WebSearchAdapter:
                     rel = link.get("rel")
                     rel_str = " ".join(rel) if isinstance(rel, list) else str(rel or "")
                     if "license" in rel_str.lower():
-                        lic = str(link["href"])
+                        # 同樣是上游 HTML 的 href,同樣會回給呼叫端 → 同樣過濾
+                        lic = _safe_result_url(str(link["href"]), url)
                         break
             result["license"] = lic
 
@@ -232,6 +236,35 @@ class WebSearchAdapter:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+
+def _safe_result_url(href: str, base: str) -> str | None:
+    """把上游 HTML 的 href 解析成可安全回給呼叫端的 http(s) URL;否則 None。
+
+    舊寫法 `href if href.startswith("http") else urljoin(base, href)` 會讓
+    非 http(s) 的 scheme 原封不動流進工具輸出:urljoin 對 `javascript:` /
+    `data:` / `vbscript:` / `file:` 這類非相對 scheme 是 no-op,因此
+    `javascript:alert(1)` 會變成 SearchResult.url,再經 service.browse_source
+    回給 MCP 呼叫端。呼叫端(agent / 聊天介面)把它當連結呈現或跟進時,
+    等於由上游頁面決定要執行什麼(CWE-79 / CWE-601)。
+
+    `startswith("http")` 另外還會放過 `httpfoo://` 之類的偽 scheme,
+    而 `//evil.com/x` 會被 urljoin 升級成 base 的 scheme 指向別的主機。
+    改為一律 urljoin(對絕對 URL 是 no-op,正常連結行為不變),再以
+    scheme 白名單過濾。
+
+    刻意只擋 scheme、不限定 host:教育資源的授權頁與附件常合法地落在
+    catalog 以外的網域(例如 creativecommons.org),限 host 會砍掉可用結果。
+    真正會對外發請求的 read 路徑另有 url_policy 把關。
+    """
+    try:
+        resolved = urljoin(base, href.strip())
+        scheme = urlparse(resolved).scheme.lower()
+    except ValueError:
+        return None
+    if scheme not in ("http", "https"):
+        return None
+    return resolved
 
 
 def _meta(soup: BeautifulSoup, *names: str) -> str | None:
