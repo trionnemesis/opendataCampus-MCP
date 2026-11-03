@@ -98,26 +98,34 @@ class TestInputLengthLimits:
 
 
 class TestHeadlessQueryEncoding:
-    """未編碼的 query 會把 & / # 送成額外參數或 fragment。"""
+    """未編碼的 query 會把 & / # 送成額外參數或 fragment。
+
+    這組測試原本在 test 內自己重寫一份 URL 組裝,等於在測一份複本;且以
+    `inspect.getsource` 比對字串來守 `quote(` 是否還在。URL 組裝搬進
+    `_build_search_url`(同時加上 url_policy 驗證)後,字串比對就失效了 ——
+    但真正要守的性質「query 必須 percent-encode」並沒有變。
+    改為直接呼叫 adapter 的真實方法並斷言行為,比字串比對更強,也不再有複本。
+    """
+
+    def _adapter(self):
+        from opendata_campus_mcp.adapters.headless import HeadlessAdapter
+
+        with pytest.warns(UserWarning):
+            return HeadlessAdapter(enabled=True)
 
     def _search_url(self, query: str) -> str:
-        """重現 HeadlessAdapter.browse 的 URL 組裝(不啟動 Playwright)。"""
-        from urllib.parse import quote
-
+        """走 HeadlessAdapter 真正用來組 URL 的那條路(不啟動 Playwright)。"""
         source = EducationSource(
             name="因材網", official_url="https://adl.edu.tw/"
         )
-        return f"{source.official_url.rstrip('/')}?q={quote(query, safe='')}"
+        return self._adapter()._build_search_url(source, query)
 
-    def test_adapter_source_uses_quote(self):
-        """守住 headless.py 本身仍以 quote() 組 URL,避免回歸。"""
-        import inspect
-
-        from opendata_campus_mcp.adapters import headless
-
-        src = inspect.getsource(headless.HeadlessAdapter.browse)
-        assert "quote(request.query" in src, "headless 必須對 query 做 percent-encode"
-        assert "?q={request.query}" not in src
+    def test_query_is_percent_encoded_by_the_adapter(self):
+        """取代原本的 inspect.getsource 字串比對:直接驗證輸出已編碼。"""
+        url = self._search_url("數學&admin=1#frag")
+        assert "%26admin%3D1%23frag" in url
+        assert "&admin=1" not in url
+        assert "#frag" not in url
 
     def test_injected_params_stay_inside_q_value(self):
         url = self._search_url("數學&admin=1#frag")
@@ -131,4 +139,12 @@ class TestHeadlessQueryEncoding:
     def test_normal_query_roundtrips(self):
         url = self._search_url("國中數學")
         assert parse_qs(urlparse(url).query)["q"] == ["國中數學"]
+
+    def test_source_outside_catalog_is_refused(self):
+        """_build_search_url 同時是 SSRF 邊界(PR #12 的 headless 部分)。"""
+        from opendata_campus_mcp.contracts import PolicyViolationError
+
+        evil = EducationSource(name="evil", official_url="https://evil.example")
+        with pytest.raises(PolicyViolationError):
+            self._adapter()._build_search_url(evil, "x")
 
