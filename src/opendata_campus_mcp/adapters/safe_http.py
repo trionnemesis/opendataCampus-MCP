@@ -1,6 +1,7 @@
 """Redirect-aware HTTP requests with URL, budget, size and content-type limits."""
 from __future__ import annotations
 
+import ipaddress
 from collections.abc import Iterable
 from urllib.parse import urljoin, urlparse
 
@@ -52,6 +53,53 @@ def _check_content_type(
     if media_type and media_type not in allowed:
         raise ResponseTooLargeError(
             f"outbound response content type is not allowed: {media_type}"
+        )
+
+
+class RedirectNotAllowedError(PolicyViolationError):
+    """Redirect hop points somewhere that must never be fetched."""
+
+
+def _assert_public_https_target(url: httpx.URL) -> None:
+    """Reject a redirect hop that leaves public HTTPS or aims at internal space.
+
+    safe_get 對「每一跳」都跑 url_policy.validate();bounded_get 服務的是
+    catalog 外的固定端點(data.gov.tw / CEEC),無法套用同一份教育來源白名單,
+    結果先前對轉址目標完全不檢查 —— 上游只要回一個 Location,httpx 就會跟下去。
+
+    已驗證的觸發條件(CWE-918):允許的來源回 302 →
+    `http://169.254.169.254/latest/meta-data/`,bounded_get 會實際發出該請求
+    並把 body 回給呼叫端(scheme 降級 + cloud metadata 端點)。
+
+    刻意只擋「真正造成影響」的類別,不限制跨網域的公開 https 轉址:
+    這些端點的轉址目標無法在離線環境逐一驗證,過嚴的 host 白名單會打斷
+    既有可用來源(如 data.gov.tw → CDN)。呼叫端若需更嚴格的同源限制,
+    應改用 safe_get 搭配 url_policy。
+
+    殘留限制:本函式比對 URL 中的 host 字面值,不防 DNS rebinding
+    (公開網域解析到內網 IP)—— 那需要 resolve-then-pin 的傳輸層改動。
+    """
+    scheme = (url.scheme or "").lower()
+    if scheme != "https":
+        raise RedirectNotAllowedError(
+            f"redirect target must use HTTPS, got {scheme or 'no scheme'!r}"
+        )
+    if url.username or url.password:
+        raise RedirectNotAllowedError("redirect target credentials are not allowed")
+
+    host = (url.host or "").lower().rstrip(".")
+    if not host:
+        raise RedirectNotAllowedError("redirect target has no host")
+    if host == "localhost" or host.endswith(".localhost"):
+        raise RedirectNotAllowedError("redirect target host is not allowed")
+
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return  # 一般網域名稱:交由上面的 scheme/credential 檢查把關
+    if not ip.is_global or ip.is_multicast:
+        raise RedirectNotAllowedError(
+            "redirect target resolves to non-public address space"
         )
 
 
@@ -159,6 +207,8 @@ async def bounded_get(
         redirects_used += 1
         if redirects_used > client.max_redirects:
             raise httpx.TooManyRedirects("Exceeded maximum allowed redirects.", request=request)
+        # 轉址目標來自上游回應標頭,屬不可信輸入 —— 發出請求「之前」就要檢查
+        _assert_public_https_target(next_request.url)
         request = next_request
     try:
         _check_content_type(response, url, allowed_content_types)
