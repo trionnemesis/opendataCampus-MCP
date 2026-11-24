@@ -294,3 +294,164 @@ class TestCiSecurityGates:
         ]
         assert offenders == [], offenders
 
+
+
+# ── 6. 轉址目的地未驗證(CWE-918 SSRF,深度防禦)──────────────────────────
+
+
+class TestBoundedGetRedirectPolicy:
+    """`bounded_get` 的初始 URL 由呼叫端固定組出,但 `Location` 由上游決定。
+
+    `OpenDataApiAdapter` 的 client 是 `follow_redirects=True`,而
+    `bounded_get` 原本不驗證任何一跳 —— 專案花力氣建的
+    `PublicEducationUrlPolicy`(拒 IP 字面值、拒非 catalog host)在這條
+    路徑上完全沒被諮詢。已實測:上游回
+    `Location: https://169.254.169.254/latest/meta-data/` 時,請求會被
+    跟隨且 body 會原樣回傳給呼叫端。
+
+    可利用前提:初始 URL 只有 dataset id(純數字)可控,故需上游
+    data.gov.tw 自己發出轉址(被入侵、開放轉址、或 DNS/TLS 中間人)。
+    MCP 用戶端無法獨立觸發 —— 列為深度防禦缺口,非可直接利用的漏洞。
+    """
+
+    _API = "https://data.gov.tw/api/v2/rest/dataset/123"
+
+    async def test_offsite_redirect_is_rejected_before_being_requested(self) -> None:
+        hops: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            hops.append(str(request.url))
+            if request.url.host == "data.gov.tw":
+                return httpx.Response(
+                    302,
+                    headers={"Location": "https://169.254.169.254/latest/meta-data/"},
+                )
+            return httpx.Response(200, json={"leaked": True})
+
+        async with _client(handler, follow_redirects=True) as client:
+            with pytest.raises(PolicyViolationError):
+                await bounded_get(
+                    client, self._API,
+                    allowed_content_types=None,
+                    url_policy=PublicEducationUrlPolicy(["data.gov.tw"]),
+                )
+        # 關鍵:第二跳必須在「送出之前」就被擋下
+        assert hops == [self._API]
+
+    async def test_unknown_host_redirect_is_rejected(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "data.gov.tw":
+                return httpx.Response(
+                    302, headers={"Location": "https://evil.example/x"}
+                )
+            return httpx.Response(200, json={"leaked": True})
+
+        async with _client(handler, follow_redirects=True) as client:
+            with pytest.raises(PolicyViolationError, match="source catalog"):
+                await bounded_get(
+                    client, self._API,
+                    allowed_content_types=None,
+                    url_policy=PublicEducationUrlPolicy(["data.gov.tw"]),
+                )
+
+    async def test_same_domain_redirect_still_followed(self) -> None:
+        """合法的同網域/子網域轉址(如 www.)不得被誤擋 —— 避免功能退化。"""
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "data.gov.tw":
+                return httpx.Response(
+                    302,
+                    headers={"Location": "https://www.data.gov.tw/api/v2/rest/dataset/123"},
+                )
+            return httpx.Response(200, json={"ok": True})
+
+        async with _client(handler, follow_redirects=True) as client:
+            resp = await bounded_get(
+                client, self._API,
+                allowed_content_types=None,
+                url_policy=PublicEducationUrlPolicy(["data.gov.tw"]),
+            )
+        assert resp.json() == {"ok": True}
+
+    async def test_no_policy_keeps_previous_behaviour(self) -> None:
+        """url_policy=None 時行為不變 —— 既有呼叫端(edumarket)不受影響。"""
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/a"):
+                return httpx.Response(302, headers={"Location": "https://other.test/b"})
+            return httpx.Response(200, json={"ok": True})
+
+        async with _client(handler, follow_redirects=True) as client:
+            resp = await bounded_get(
+                client, "https://x.test/a", allowed_content_types=None
+            )
+        assert resp.json() == {"ok": True}
+
+
+class TestOpenDataAdapterRedirectPolicy:
+    """adapter 層端到端:read() 必須帶著 host policy 呼叫 bounded_get。"""
+
+    @staticmethod
+    def _adapter(handler):
+        from opendata_campus_mcp.adapters.opendata import OpenDataApiAdapter
+
+        a = OpenDataApiAdapter()
+        a._client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler), follow_redirects=True
+        )
+        return a
+
+    async def test_read_rejects_offsite_redirect(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "data.gov.tw":
+                return httpx.Response(
+                    302,
+                    headers={"Location": "https://169.254.169.254/latest/meta-data/"},
+                )
+            return httpx.Response(
+                200, json={"success": True, "result": {"title": "LEAKED"}}
+            )
+
+        a = self._adapter(handler)
+        try:
+            with pytest.raises(PolicyViolationError):
+                await a.read("https://data.gov.tw/dataset/123", ["title"])
+        finally:
+            await a.aclose()
+
+    async def test_read_still_works_without_redirect(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "result": {
+                        "title": "大專校院學生數",
+                        "description": "教育部統計處",
+                        "license": "1",
+                        "distribution": [
+                            {
+                                "resourceFormat": "CSV",
+                                "resourceDownloadUrl": "https://data.gov.tw/x.csv",
+                            }
+                        ],
+                    },
+                },
+            )
+
+        a = self._adapter(handler)
+        try:
+            out = await a.read("https://data.gov.tw/dataset/123", ["title"])
+        finally:
+            await a.aclose()
+        assert out["title"] == "大專校院學生數"
+        assert out["license"].startswith("政府資料開放授權條款")
+        assert out["resources"] == [
+            {"format": "CSV", "download_url": "https://data.gov.tw/x.csv"}
+        ]
+
+    def test_adapter_passes_a_policy(self) -> None:
+        """防回歸:日後有人移掉 url_policy= 參數就會被抓到。"""
+        src = (
+            Path(__file__).resolve().parents[1]
+            / "src/opendata_campus_mcp/adapters/opendata.py"
+        ).read_text(encoding="utf-8")
+        assert "url_policy=_HOST_POLICY" in src
