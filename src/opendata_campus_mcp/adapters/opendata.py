@@ -17,11 +17,13 @@ import json
 import logging
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
 from opendata_campus_mcp.adapters._http import build_ssl_context
 from opendata_campus_mcp.adapters.safe_http import bounded_get
+from opendata_campus_mcp.domain.url_policy import PublicEducationUrlPolicy
 from opendata_campus_mcp.contracts import (
     AccessStrategy,
     BrowseRequest,
@@ -41,6 +43,11 @@ _USER_AGENT = "Education-Resource-Browser-MCP/1.0 (non-commercial; user-triggere
 _MAX_SUMMARY_CHARS = 500
 _TIMEOUT = 20.0
 _DATASET_ID_RE = re.compile(r"dataset/(\d+)")
+# 本 adapter 的 client 是 follow_redirects=True(data.gov.tw 的 API 端點),
+# 故轉址目的地必須逐跳驗證:只允許留在 data.gov.tw 及其子網域。
+# 沒有這道檢查時,上游一個 302 就能把請求導向任意主機(CWE-918);
+# 已實測 `Location: https://169.254.169.254/...` 會被跟隨並回傳 body。
+_HOST_POLICY = PublicEducationUrlPolicy([urlparse(_BASE).hostname or ""])
 
 
 class OpenDataApiAdapter:
@@ -85,7 +92,10 @@ class OpenDataApiAdapter:
         try:
             # bounded_get:回應大小上限(CWE-400)。固定端點的 JSON API,
             # 上游實際 Content-Type 未經本機驗證,故不加型別白名單。
-            resp = await bounded_get(self._client, api_url, allowed_content_types=None)
+            resp = await bounded_get(
+                self._client, api_url,
+                allowed_content_types=None, url_policy=_HOST_POLICY,
+            )
         except httpx.TransportError as exc:
             raise SourceUnavailableError("政府資料開放平臺", url, str(exc))
         if resp.status_code >= 400:

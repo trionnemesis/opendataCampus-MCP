@@ -142,8 +142,16 @@ async def bounded_get(
     allowed_content_types: Iterable[str] | None = ALLOWED_CONTENT_TYPES,
     follow_redirects: bool | None = None,
     params: dict[str, str | int] | None = None,
+    url_policy: PublicEducationUrlPolicy | None = None,
 ) -> httpx.Response:
-    """Read a fixed-endpoint response with the same decoded-byte budget."""
+    """Read a fixed-endpoint response with the same decoded-byte budget.
+
+    `url_policy` 僅在「跟隨轉址」時才需要:初始 URL 由呼叫端固定組出,
+    但 `Location` 由上游決定。沒有 policy 時每一跳都無人檢查,上游一個
+    轉址就能把請求送往任意主機 —— 包含 IP 字面值與雲端 metadata 端點
+    (CWE-918 SSRF)。`safe_get` 早已逐跳驗證,此處對齊。
+    None 保持原行為,不影響既有呼叫端。
+    """
     max_bytes = MAX_RESPONSE_BYTES if max_bytes is None else max_bytes
     request = client.build_request("GET", url, params=params)
     redirects = client.follow_redirects if follow_redirects is None else follow_redirects
@@ -159,6 +167,9 @@ async def bounded_get(
         redirects_used += 1
         if redirects_used > client.max_redirects:
             raise httpx.TooManyRedirects("Exceeded maximum allowed redirects.", request=request)
+        if url_policy is not None:
+            # 送出前驗證,而非收到回應後才檢查。
+            url_policy.validate(str(next_request.url))
         request = next_request
     try:
         _check_content_type(response, url, allowed_content_types)
